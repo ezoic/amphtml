@@ -38,5 +38,5 @@ Supported parameters:
 
 - `data-domainid`: the id assigned to you by ezoic platform
 - `data-adunit`: the adunit name corresponding to the ad position
-- `data-ezoic`: additional ezoic targeting information. this is reserved for ezoic use only
+- `data-json`: additional ezoic targeting information. this is reserved for ezoic use only
 
