@@ -21,7 +21,9 @@ limitations under the License.
 ```html
 <amp-ad width=300 height=250
     type="ezoic"
-    data-domainid="999999" data-adunit="adunit-name">
+    data-domainid="999999" 
+    data-adunit="adunit-name" 
+    data-json='{"targeting":{"compid":0}}'>
 </amp-ad>
 ```
 
@@ -38,5 +40,7 @@ Supported parameters:
 
 - `data-domainid`: the id assigned to you by ezoic platform
 - `data-adunit`: the adunit name corresponding to the ad position
-- `data-json`: additional ezoic targeting information. this is reserved for ezoic use only
 
+Supported via `json` attribute:
+
+- `targeting`

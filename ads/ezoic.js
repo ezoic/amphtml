@@ -21,8 +21,14 @@ import {loadScript, checkData} from '../3p/3p';
  * @param {!Object} data
  */
 export function ezoic(global, data) {
-  checkData(data, ['domainid','adunit','json']);
-  loadScript(global, 'https://g.ezoic.net/ezoic/ampad.js', () => {
-    new EzoicAmpAd().DisplayAd({'domainid': data.domainid, 'async': true, 'adunit':data.adunit, 'json': data.json});
-  });
+  	checkData(data, ['domainid','adunit','json']);
+  	loadScript(global, 'https://go.ezoic.net/ezoic/ampad.js', () => {
+    	new EzoicAmpAd().DisplayAd({
+    		'width'   :data.width,
+    		'height'  :data.height,
+    		'domainid':data.domainid,
+    		'adunit'  :data.adunit, 
+    		'json'    :data.json
+    	});
+    });
 }
