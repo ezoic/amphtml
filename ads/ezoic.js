@@ -15,7 +15,6 @@
  */
 
 import {loadScript, checkData} from '../3p/3p';
-import {user} from '../src/log';
 
 /**
  * @param {!Window} global
