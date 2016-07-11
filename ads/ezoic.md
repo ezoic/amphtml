@@ -21,9 +21,8 @@ limitations under the License.
 ```html
 <amp-ad width=300 height=250
     type="ezoic"
-    data-domainid="999999" 
-    data-adunit="adunit-name" 
-    data-json='{"targeting":{"compid":0}}'>
+    data-slot="slot-name" 
+    data-json='{"targeting":{"compid":0}, "extras":{"adsense_text_color":"000000"}'>
 </amp-ad>
 ```
 
@@ -38,9 +37,9 @@ To generate tags, please visit https://svc.ezoic.com/publisher.php?login
 
 Supported parameters:
 
-- `data-domainid`: the id assigned to you by ezoic platform
-- `data-adunit`: the adunit name corresponding to the ad position
+- `data-slot`: the slot name corresponding to the ad position
 
 Supported via `json` attribute:
 
 - `targeting`
+- `extras`
