@@ -15,20 +15,19 @@
  */
 
 import {loadScript, checkData} from '../3p/3p';
+import {user} from '../src/log';
 
 /**
  * @param {!Window} global
  * @param {!Object} data
  */
 export function ezoic(global, data) {
-  	checkData(data, ['domainid','adunit','json']);
-  	loadScript(global, 'https://go.ezoic.net/ezoic/ampad.js', () => {
-    	new EzoicAmpAd().DisplayAd({
-    		'width'   :data.width,
-    		'height'  :data.height,
-    		'domainid':data.domainid,
-    		'adunit'  :data.adunit, 
-    		'json'    :data.json
-    	});
+    checkData(data, ['slot','targeting','extras']);
+    loadScript(global, 'https://g.ezoic.net/ezoic/ampad.js', () => {
+        loadScript(global, 'https://www.googletagservices.com/tag/js/gpt.js', () => {
+            global.googletag.cmd.push(() => {
+                new EzoicAmpAd(global,data).createAd();
+            });
+        });
     });
 }

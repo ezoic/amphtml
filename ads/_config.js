@@ -32,7 +32,10 @@ export const adPrefetch = {
   aduptech: 'https://s.d.adup-tech.com/jsapi',
   criteo: 'https://static.criteo.net/js/ld/publishertag.js',
   dotandads: 'https://amp.ad.dotandad.com/dotandadsAmp.js',
-  ezoic: 'http://g.ezoic.net/ezoic/ampad.js',
+  ezoic: [
+    'https://www.googletagservices.com/tag/js/gpt.js',
+    'https://g.ezoic.net/ezoic/ampad.js',
+  ],
   industrybrains: 'https://web.industrybrains.com/js/ads/async/show.js',
   mediaimpact: 'https://ec-ns.sascdn.com/diff/251/divscripte/amp.js',
   openx: 'https://www.googletagservices.com/tag/js/gpt.js',
