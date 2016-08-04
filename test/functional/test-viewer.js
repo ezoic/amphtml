@@ -17,7 +17,6 @@
 import {Viewer} from '../../src/service/viewer-impl';
 import {dev} from '../../src/log';
 import {platform} from '../../src/platform';
-import {setModeForTesting} from '../../src/mode';
 import * as sinon from 'sinon';
 
 
@@ -101,6 +100,15 @@ describe('Viewer', () => {
     expect(viewer.getParam('other')).to.equal('something');
   });
 
+  it('should expose viewer capabilities', () => {
+    windowApi.name = '__AMP__viewportType=natural';
+    windowApi.location.hash = '#paddingTop=17&cap=foo,bar';
+    const viewer = new Viewer(windowApi);
+    expect(viewer.hasCapability('foo')).to.be.true;
+    expect(viewer.hasCapability('bar')).to.be.true;
+    expect(viewer.hasCapability('other')).to.be.false;
+  });
+
   it('should not clear fragment in non-embedded mode', () => {
     windowApi.parent = windowApi;
     windowApi.location.href = 'http://www.example.com#test=1';
@@ -108,6 +116,7 @@ describe('Viewer', () => {
     const viewer = new Viewer(windowApi);
     expect(windowApi.history.replaceState.callCount).to.equal(0);
     expect(viewer.getParam('test')).to.equal('1');
+    expect(viewer.hasCapability('foo')).to.be.false;
   });
 
   it('should clear fragment in embedded mode', () => {
@@ -171,15 +180,79 @@ describe('Viewer', () => {
   it('should configure performance tracking', () => {
     windowApi.location.hash = '';
     let viewer = new Viewer(windowApi);
+    viewer.messagingMaybePromise_ = Promise.resolve();
     expect(viewer.isPerformanceTrackingOn()).to.be.false;
 
     windowApi.location.hash = '#csi=1';
     viewer = new Viewer(windowApi);
+    viewer.messagingMaybePromise_ = Promise.resolve();
     expect(viewer.isPerformanceTrackingOn()).to.be.true;
 
     windowApi.location.hash = '#csi=0';
     viewer = new Viewer(windowApi);
+    viewer.messagingMaybePromise_ = Promise.resolve();
     expect(viewer.isPerformanceTrackingOn()).to.be.false;
+
+    windowApi.location.hash = '#csi=1';
+    viewer = new Viewer(windowApi);
+    viewer.messagingMaybePromise_ = null;
+    expect(viewer.isPerformanceTrackingOn()).to.be.false;
+
+    windowApi.location.hash = '#csi=0';
+    viewer = new Viewer(windowApi);
+    viewer.messagingMaybePromise_ = null;
+    expect(viewer.isPerformanceTrackingOn()).to.be.false;
+  });
+
+  it('should get fragment from the url in non-embedded mode', () => {
+    windowApi.parent = windowApi;
+    windowApi.location.hash = '#foo';
+    const viewer = new Viewer(windowApi);
+    return viewer.getFragment().then(fragment => {
+      expect(fragment).to.be.equal('foo');
+    });
+  });
+
+  it('should get fragment from the viewer in embedded mode' +
+      'if the viewer has capability of getting fragment', () => {
+    windowApi.parent = {};
+    windowApi.location.hash = '#foo&cap=fragment';
+    const viewer = new Viewer(windowApi);
+    sandbox.stub(viewer, 'sendMessageUnreliable_', name => {
+      expect(name).to.equal('fragment');
+      return Promise.resolve('from-viewer');
+    });
+    return viewer.getFragment().then(fragment => {
+      expect(fragment).to.be.equal('from-viewer');
+    });
+  });
+
+  it('should NOT get fragment from the viewer in embedded mode' +
+      'if the viewer does NOT have capability of getting fragment', () => {
+    windowApi.parent = {};
+    windowApi.location.hash = '#foo';
+    const viewer = new Viewer(windowApi);
+    sandbox.stub(viewer, 'sendMessageUnreliable_', name => {
+      expect(name).to.equal('fragment');
+      return Promise.resolve('from-viewer');
+    });
+    return viewer.getFragment().then(fragment => {
+      expect(fragment).to.equal('');
+    });
+  });
+
+  it('should NOT get fragment from the viewer in embedded mode' +
+      'if the viewer does NOT return a fragment', () => {
+    windowApi.parent = {};
+    windowApi.location.hash = '#foo';
+    const viewer = new Viewer(windowApi);
+    sandbox.stub(viewer, 'sendMessageUnreliable_', name => {
+      expect(name).to.equal('fragment');
+      return Promise.resolve();
+    });
+    return viewer.getFragment().then(fragment => {
+      expect(fragment).to.equal('');
+    });
   });
 
   it('should configure correctly for iOS embedding', () => {
@@ -195,12 +268,11 @@ describe('Viewer', () => {
     windowApi.name = '__AMP__viewportType=natural';
     windowApi.parent = windowApi;
     sandbox.mock(platform).expects('isIos').returns(true).atLeast(1);
-    setModeForTesting({
+    windowApi.AMP_MODE = {
       localDev: false,
       development: false,
-    });
+    };
     const viewportType = new Viewer(windowApi).getViewportType();
-    setModeForTesting(null);
     expect(viewportType).to.equal('natural');
   });
 
@@ -407,6 +479,13 @@ describe('Viewer', () => {
     expect(m.data.title).to.equal('Awesome doc');
   });
 
+  it('should post scroll event', () => {
+    viewer.postScroll(111);
+    const m = viewer.messageQueue_[0];
+    expect(m.eventType).to.equal('scroll');
+    expect(m.data.scrollTop).to.equal(111);
+  });
+
   it('should post request/cancelFullOverlay event', () => {
     viewer.requestFullOverlay();
     viewer.cancelFullOverlay();
@@ -419,6 +498,31 @@ describe('Viewer', () => {
     viewer.postDocumentReady();
     expect(viewer.messageQueue_.length).to.equal(1);
     expect(viewer.messageQueue_[0].eventType).to.equal('documentLoaded');
+  });
+
+  it('should not request cid', () => {
+    sandbox.stub(viewer, 'isTrustedViewer', () => {
+      return Promise.resolve(false);
+    });
+    sandbox.stub(viewer, 'sendMessage', () => {
+      return Promise.reject('should not be requested');
+    });
+    return viewer.getBaseCid().then(cid => {
+      expect(cid).to.be.undefined;
+    });
+  });
+
+  it('should request cid for trusted viewer', () => {
+    sandbox.stub(viewer, 'isTrustedViewer', () => {
+      return Promise.resolve(true);
+    });
+    sandbox.stub(viewer, 'sendMessage', name => {
+      expect(name).to.equal('cid');
+      return Promise.resolve('from-viewer');
+    });
+    return viewer.getBaseCid().then(cid => {
+      expect(cid).to.be.equal('from-viewer');
+    });
   });
 
   it('should dequeue events when deliverer set', () => {
@@ -994,6 +1098,45 @@ describe('Viewer', () => {
       });
       clock.tick(1010);
       return result;
+    });
+  });
+
+  describe('navigateTo', () => {
+    const ampUrl = 'https://cdn.ampproject.org/test/123';
+    it('should initiate a2a navigation', () => {
+      windowApi.location.hash = '#cap=a2a';
+      windowApi.top = {
+        location: {},
+      };
+      const viewer = new Viewer(windowApi);
+      const send = sandbox.stub(viewer, 'sendMessage');
+      viewer.navigateTo(ampUrl, 'abc123');
+      expect(send.lastCall.args[0]).to.equal('a2a');
+      expect(send.lastCall.args[1]).to.jsonEqual({
+        url: ampUrl,
+        requestedBy: 'abc123',
+      });
+      expect(windowApi.top.location.href).to.be.undefined;
+    });
+
+    it('should fail for non-amp url', () => {
+      windowApi.location.hash = '#cap=a2a';
+      const viewer = new Viewer(windowApi);
+      sandbox.stub(viewer, 'sendMessage');
+      expect(() => {
+        viewer.navigateTo('http://www.test.com', 'abc123');
+      }).to.throw(/Invalid A2A URL/);
+    });
+
+    it('should perform fallback navigation', () => {
+      windowApi.top = {
+        location: {},
+      };
+      const viewer = new Viewer(windowApi);
+      const send = sandbox.stub(viewer, 'sendMessage');
+      viewer.navigateTo(ampUrl, 'abc123');
+      expect(send.callCount).to.equal(0);
+      expect(windowApi.top.location.href).to.equal(ampUrl);
     });
   });
 });

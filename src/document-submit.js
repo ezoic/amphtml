@@ -14,17 +14,25 @@
  * limitations under the License.
  */
 
-import {startsWith} from '../src/string';
-import {user} from '../src/log';
-import {assertHttpsUrl} from '../src/url';
+import {startsWith} from './string';
+import {user} from './log';
+import {assertHttpsUrl} from './url';
+import {urls} from './config';
+
+
+/** @const {string} */
+const PROP = '__AMP_SUBMIT';
 
 
 /**
  * @param {!Window} window
  */
 export function installGlobalSubmitListener(window) {
-  window.document.documentElement.addEventListener(
-      'submit', onDocumentFormSubmit_, true);
+  if (!window[PROP]) {
+    window[PROP] = true;
+    window.document.documentElement.addEventListener(
+        'submit', onDocumentFormSubmit_, true);
+  }
 }
 
 
@@ -47,8 +55,8 @@ export function onDocumentFormSubmit_(e) {
   const action = form.getAttribute('action');
   user.assert(action, 'form action attribute is required: %s', form);
   assertHttpsUrl(action, form, 'action');
-  user.assert(!startsWith(action, 'https://cdn.ampproject.org'),
-      'form action should not be on cdn.ampproject.org: %s', form);
+  user.assert(!startsWith(action, urls.cdn),
+      'form action should not be on AMP CDN: %s', form);
 
   const target = form.getAttribute('target');
   user.assert(target, 'form target attribute is required: %s', form);

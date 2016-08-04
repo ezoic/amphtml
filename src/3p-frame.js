@@ -18,7 +18,9 @@
 import {getLengthNumeral} from '../src/layout';
 import {getService} from './service';
 import {documentInfoFor} from './document-info';
+import {tryParseJson} from './json';
 import {getMode} from './mode';
+import {getModeObject} from './mode-object';
 import {getIntersectionChangeEntry} from './intersection-observer';
 import {preconnectFor} from './preconnect';
 import {dashToCamelCase} from './string';
@@ -27,11 +29,14 @@ import {timer} from './timer';
 import {user} from './log';
 import {viewportFor} from './viewport';
 import {viewerFor} from './viewer';
+import {urls} from './config';
 
 
 /** @type {!Object<string,number>} Number of 3p frames on the for that type. */
 let count = {};
 
+/** @type {string} */
+let overrideBootstrapBaseUrl;
 
 /**
  * Produces the attributes for the ad template.
@@ -74,8 +79,9 @@ function getFrameAttributes(parentWindow, element, opt_type) {
       href: locationHref,
     },
     tagName: element.tagName,
-    mode: getMode(),
+    mode: getModeObject(),
     hidden: !viewer.isVisible(),
+    startTime,
     amp3pSentinel: generateSentinel(parentWindow),
     initialIntersection: getIntersectionChangeEntry(
         timer.now(),
@@ -147,10 +153,8 @@ export function addDataAndJsonAttributes_(element, attributes) {
   }
   const json = element.getAttribute('json');
   if (json) {
-    let obj;
-    try {
-      obj = JSON.parse(json);
-    } catch (e) {
+    const obj = tryParseJson(json);
+    if (obj === undefined) {
       throw user.createError(
           'Error parsing JSON in json attribute in element %s',
           element);
@@ -162,18 +166,18 @@ export function addDataAndJsonAttributes_(element, attributes) {
 }
 
 /**
- * Prefetches URLs related to the bootstrap iframe.
+ * Preloads URLs related to the bootstrap iframe.
  * @param {!Window} parentWindow
  * @return {string}
  */
-export function prefetchBootstrap(window) {
+export function preloadBootstrap(window) {
   const url = getBootstrapBaseUrl(window);
   const preconnect = preconnectFor(window);
-  preconnect.prefetch(url, 'document');
+  preconnect.preload(url, 'document');
   // While the URL may point to a custom domain, this URL will always be
   // fetched by it.
-  preconnect.prefetch(
-      'https://3p.ampproject.net/$internalRuntimeVersion$/f.js', 'script');
+  preconnect.preload(
+      `${urls.thirdParty}/$internalRuntimeVersion$/f.js`, 'script');
 }
 
 /**
@@ -190,14 +194,21 @@ export function getBootstrapBaseUrl(parentWindow, opt_strictForUnitTest) {
   });
 }
 
+export function setDefaultBootstrapBaseUrlForTesting(url) {
+  overrideBootstrapBaseUrl = url;
+}
+
 /**
  * Returns the default base URL for 3p bootstrap iframes.
  * @param {!Window} parentWindow
  * @return {string}
  */
 function getDefaultBootstrapBaseUrl(parentWindow) {
-  if (getMode().localDev || parentWindow.AMP_TEST) {
-    const prefix = parentWindow.AMP_TEST ? '/base' : '';
+  if (getMode().localDev || getMode().test) {
+    if (overrideBootstrapBaseUrl) {
+      return overrideBootstrapBaseUrl;
+    }
+    const prefix = getMode().test ? '/base' : '';
     return 'http://ads.localhost:' +
         (parentWindow.location.port || parentWindow.parent.location.port) +
         prefix + '/dist.3p/current' +
@@ -205,7 +216,7 @@ function getDefaultBootstrapBaseUrl(parentWindow) {
         '.html';
   }
   return 'https://' + getSubDomain(parentWindow) +
-      '.ampproject.net/$internalRuntimeVersion$/frame.html';
+      `.${urls.thirdPartyFrameHost}/$internalRuntimeVersion$/frame.html`;
 }
 
 /**

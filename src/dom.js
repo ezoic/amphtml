@@ -161,6 +161,23 @@ export function closest(element, callback) {
 
 
 /**
+ * Finds the closest node that satisfies the callback from this node
+ * up the DOM subtree.
+ * @param {!Node} node
+ * @param {function(!Node):boolean} callback
+ * @return {?Node}
+ */
+export function closestNode(node, callback) {
+  for (let n = node; n; n = n.parentNode) {
+    if (callback(n)) {
+      return n;
+    }
+  }
+  return null;
+}
+
+
+/**
  * Finds the closest element with the specified name from this element
  * up the DOM subtree.
  * @param {!Element} element
@@ -211,7 +228,7 @@ export function childElement(parent, callback) {
  * Finds all child elements that satisfies the callback.
  * @param {!Element} parent
  * @param {function(!Element):boolean} callback
- * @return {!Array.<!Element>}
+ * @return {!Array<!Element>}
  */
 export function childElements(parent, callback) {
   const children = [];
@@ -322,7 +339,7 @@ export function lastChildElementByAttr(parent, attr) {
  * Finds all child elements that has the specified attribute.
  * @param {!Element} parent
  * @param {string} attr
- * @return {!Array.<!Element>}
+ * @return {!Array<!Element>}
  */
 export function childElementsByAttr(parent, attr) {
   if (scopeSelectorSupported == null) {
@@ -352,6 +369,26 @@ export function childElementByTag(parent, tagName) {
   }
   tagName = tagName.toUpperCase();
   return childElement(parent, el => {
+    return el.tagName == tagName;
+  });
+}
+
+
+/**
+ * Finds all child elements with the specified tag name.
+ * @param {!Element} parent
+ * @param {string} tagName
+ * @return {!Array<!Element>}
+ */
+export function childElementsByTag(parent, tagName) {
+  if (scopeSelectorSupported == null) {
+    scopeSelectorSupported = isScopeSelectorSupported(parent);
+  }
+  if (scopeSelectorSupported) {
+    return toArray(parent.querySelectorAll(':scope > ' + tagName));
+  }
+  tagName = tagName.toUpperCase();
+  return childElements(parent, el => {
     return el.tagName == tagName;
   });
 }
@@ -429,4 +466,14 @@ export function openWindowDialog(win, url, target, opt_features) {
     res = win.open(url, '_top');
   }
   return res;
+}
+
+/**
+ * Whether the element is a script tag with application/json type.
+ * @param {!Element} element
+ * @return {boolean}
+ */
+export function isJsonScriptTag(element) {
+  return element.tagName == 'SCRIPT' &&
+            element.getAttribute('type').toUpperCase() == 'APPLICATION/JSON';
 }

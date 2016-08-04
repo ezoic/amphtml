@@ -19,7 +19,16 @@ import {
   parseQueryString,
 } from '../../src/url';
 import {closest, openWindowDialog} from '../../src/dom';
+import {urls} from '../../src/config';
 
+
+/**
+ * Origins that are trusted to serve valid AMP documents.
+ */
+const ampOrigins = {
+  [urls.cdn]: true,
+  'http://localhost:8000': true,
+};
 
 
 /**
@@ -61,6 +70,9 @@ export function handleClick(e) {
   if (!link || !link.eventualUrl) {
     return;
   }
+  if (e.isTrusted === false) {
+    return;
+  }
 
   // Tag the original href with &amp=1 and make it a fragment param with
   // name click.
@@ -75,7 +87,7 @@ export function handleClick(e) {
   const win = link.a.ownerDocument.defaultView;
   const ancestors = win.location.ancestorOrigins;
   if (ancestors && ancestors[ancestors.length - 1] == 'http://localhost:8000') {
-    destination = destination.replace('https://cdn.ampproject.org/c/',
+    destination = destination.replace(`${urls.cdn}/c/`,
         'http://localhost:8000/max/');
   }
 
@@ -118,7 +130,7 @@ function getEventualUrl(a) {
   if (!eventualUrl) {
     return;
   }
-  if (!eventualUrl.indexOf('https://cdn.ampproject.org/c/') == 0) {
+  if (!eventualUrl.indexOf(`${urls.cdn}/c/`) == 0) {
     return;
   }
   return eventualUrl;
@@ -133,6 +145,13 @@ function getEventualUrl(a) {
  */
 function navigateTo(win, a, url) {
   const target = (a.target || '_top').toLowerCase();
+  const a2aAncestor = getA2AAncestor(win);
+  if (a2aAncestor) {
+    a2aAncestor.win./*OK*/postMessage('a2a;' + JSON.stringify({
+      url,
+    }), a2aAncestor.origin);
+    return;
+  }
   openWindowDialog(win, url, target);
 }
 
@@ -145,13 +164,13 @@ export function warmupStatic(win) {
   // Preconnect using an image, because that works on all browsers.
   // The image has a 1 minute cache time to avoid duplicate
   // preconnects.
-  new win.Image().src = 'https://cdn.ampproject.org/preconnect.gif';
+  new win.Image().src = `${urls.cdn}/preconnect.gif`;
   // Preload the primary AMP JS that is render blocking.
   const linkRel = /*OK*/document.createElement('link');
   linkRel.rel = 'preload';
   linkRel.setAttribute('as', 'script');
   linkRel.href =
-      'https://cdn.ampproject.org/rtv/01$internalRuntimeVersion$/v0.js';
+      `${urls.cdn}/rtv/01$internalRuntimeVersion$/v0.js`;
   getHeadOrFallback(win.document).appendChild(linkRel);
 }
 
@@ -180,4 +199,52 @@ export function warmupDynamic(e) {
  */
 function getHeadOrFallback(doc) {
   return doc.head || doc.documentElement;
+}
+
+/**
+ * Returns info about an ancestor that can perform A2A navigations
+ * or null if none is present.
+ * @param {!Window} win
+ * @return {?{
+ *   win: !Window,
+ *   origin: string,
+ * }}
+ */
+export function getA2AAncestor(win) {
+  if (!win.location.ancestorOrigins) {
+    return null;
+  }
+  const origins = win.location.ancestorOrigins;
+  // We expect top, amp cache, ad (can be nested).
+  if (origins.length < 2) {
+    return null;
+  }
+  const top = origins[origins.length - 1];
+  // Not a security property. We just check whether the
+  // viewer might support A2A. More domains can be added to whitelist
+  // as needed.
+  if (top.indexOf('.google.') == -1) {
+    return null;
+  }
+  const amp = origins[origins.length - 2];
+  if (!ampOrigins[amp] && !ampOrigins.hasOwnProperty(amp)) {
+    return null;
+  }
+  return {
+    win: getNthParentWindow(win, origins.length - 1),
+    origin: amp,
+  };
+}
+
+/**
+ * Returns the Nth parent of the given window.
+ * @param {!Window} win
+ * @param {number} distance frames above us.
+ */
+function getNthParentWindow(win, distance) {
+  let parent = win;
+  for (let i = 0; i < distance; i++) {
+    parent = parent.parent;
+  }
+  return parent;
 }

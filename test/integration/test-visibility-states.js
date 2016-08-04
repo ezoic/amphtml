@@ -25,7 +25,7 @@ import {resourcesFor} from '../../src/resources';
 import {VisibilityState} from '../../src/visibility-state';
 import * as sinon from 'sinon';
 
-describe('Viewer Visibility State', () => {
+describe.configure().retryOnSaucelabs().run('Viewer Visibility State', () => {
 
   // This test only works with uncompiled JS, because it stubs out
   // private properties.
@@ -42,7 +42,8 @@ describe('Viewer Visibility State', () => {
 
   function noop() {}
 
-  describe('Element Transitions', () => {
+  // TODO(#3561): unmute the test.
+  describe.configure().skipSafari().run('Element Transitions', () => {
     let fixture;
     let resources;
     let viewer;

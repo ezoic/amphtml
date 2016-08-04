@@ -18,14 +18,15 @@ import {AccessClientAdapter} from './amp-access-client';
 import {AccessOtherAdapter} from './amp-access-other';
 import {AccessServerAdapter} from './amp-access-server';
 import {CSS} from '../../../build/amp-access-0.1.css';
-import {actionServiceFor} from '../../../src/action';
+import {SignInProtocol} from './signin';
+import {actionServiceForDoc} from '../../../src/action';
 import {analyticsFor} from '../../../src/analytics';
 import {assertHttpsUrl, getSourceOrigin} from '../../../src/url';
 import {cancellation} from '../../../src/error';
 import {cidFor} from '../../../src/cid';
 import {evaluateAccessExpr} from './access-expr';
 import {getService} from '../../../src/service';
-import {getValueForExpr} from '../../../src/json';
+import {getValueForExpr, tryParseJson} from '../../../src/json';
 import {installStyles} from '../../../src/styles';
 import {isExperimentOn} from '../../../src/experiments';
 import {isObject} from '../../../src/types';
@@ -90,12 +91,9 @@ export class AccessService {
     /** @const @private {!Element} */
     this.accessElement_ = accessElement;
 
-    let configJson;
-    try {
-      configJson = JSON.parse(this.accessElement_.textContent);
-    } catch (e) {
+    const configJson = tryParseJson(this.accessElement_.textContent, e => {
       throw user.createError('Failed to parse "amp-access" JSON: ' + e);
-    }
+    });
 
     /** @const @private {!AccessType} */
     this.type_ = this.buildConfigType_(configJson);
@@ -149,6 +147,10 @@ export class AccessService {
     /** @private {?JSONType} */
     this.authResponse_ = null;
 
+    /** @const @private {!SignInProtocol} */
+    this.signIn_ = new SignInProtocol(win, this.viewer_, this.pubOrigin_,
+        configJson);
+
     /** @const @private {!Promise} */
     this.firstAuthorizationPromise_ = new Promise(resolve => {
       /** @private {!Promise} */
@@ -199,7 +201,7 @@ export class AccessService {
       case AccessType.OTHER:
         return new AccessOtherAdapter(this.win, configJson, context);
     }
-    throw dev.createError('Unsuported access type: ', this.type_);
+    throw dev.createError('Unsupported access type: ', this.type_);
   }
 
   /**
@@ -213,6 +215,10 @@ export class AccessService {
     if (type == AccessType.SERVER && !this.isServerEnabled_) {
       user.warn(TAG, 'Experiment "amp-access-server" is not enabled.');
       type = AccessType.CLIENT;
+    }
+    if (type == AccessType.CLIENT && this.isServerEnabled_) {
+      user.info(TAG, 'Forcing access type: SERVER');
+      type = AccessType.SERVER;
     }
     return type;
   }
@@ -280,11 +286,16 @@ export class AccessService {
     dev.fine(TAG, 'config:', this.type_, this.loginConfig_,
         this.adapter_.getConfig());
 
-    actionServiceFor(this.win).installActionHandler(
+    // TODO(dvoytenko, #3742): This will refer to the ampdoc once AccessService
+    // is migrated to ampdoc as well.
+    actionServiceForDoc(this.win.document.documentElement).installActionHandler(
         this.accessElement_, this.handleAction_.bind(this));
 
     // Calculate login URLs right away.
     this.buildLoginUrls_();
+
+    // Start sign-in.
+    this.signIn_.start();
 
     // Start authorization XHR immediately.
     this.runAuthorization_();
@@ -364,6 +375,7 @@ export class AccessService {
       const vars = {
         'READER_ID': readerId,
         'ACCESS_READER_ID': readerId,  // A synonym.
+        'ACCESS_TOKEN': () => this.signIn_.getAccessTokenPassive(),
       };
       if (useAuthData) {
         vars['AUTHDATA'] = field => {
@@ -393,7 +405,12 @@ export class AccessService {
     }
 
     this.toggleTopClass_('amp-access-loading', true);
-    const responsePromise = this.adapter_.authorize().catch(error => {
+    const startPromise = isExperimentOn(this.win, 'no-auth-in-prerender')
+        ? this.viewer_.whenFirstVisible()
+        : Promise.resolve();
+    const responsePromise = startPromise.then(() => {
+      return this.adapter_.authorize();
+    }).catch(error => {
       this.analyticsEvent_('access-authorization-failed');
       if (this.authorizationFallbackResponse_ && !opt_disableFallback) {
         // Use fallback.
@@ -753,7 +770,9 @@ export class AccessService {
         'Login URL is not ready: %s', type);
 
     this.loginAnalyticsEvent_(type, 'started');
-    const loginPromise = this.openLoginDialog_(loginUrl).then(result => {
+    const dialogPromise = this.signIn_.requestSignIn(loginUrl) ||
+        this.openLoginDialog_(loginUrl);
+    const loginPromise = dialogPromise.then(result => {
       dev.fine(TAG, 'Login dialog completed: ', type, result);
       this.loginPromise_ = null;
       const query = parseQueryString(result);
@@ -764,14 +783,19 @@ export class AccessService {
       } else {
         this.loginAnalyticsEvent_(type, 'rejected');
       }
+      const exchangePromise = this.signIn_.postLoginResult(query) ||
+          Promise.resolve();
       if (success || !s) {
         // In case of a success, repeat the authorization and pingback flows.
         // Also do this for an empty response to avoid false negatives.
         // Pingback is repeated in this case since this could now be a new
         // "view" with a different access profile.
-        this.broadcastReauthorize_();
-        return this.runAuthorization_(/* disableFallback */ true).then(() => {
-          this.scheduleView_(/* timeToView */ 0);
+        return exchangePromise.then(() => {
+          this.broadcastReauthorize_();
+          return this.runAuthorization_(/* disableFallback */ true)
+              .then(() => {
+                this.scheduleView_(/* timeToView */ 0);
+              });
         });
       }
     }).catch(reason => {

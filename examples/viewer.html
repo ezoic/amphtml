@@ -85,10 +85,12 @@
       bottom: 0;
       overflow-x: hidden;
       visibility: hidden;
+      transform: translateX(-100%);
     }
 
     viewer[data-show-container="1"] #container1 {
       visibility: visible;
+      transform: none;
     }
 
     viewer[data-show-container="1"] #show-container1-anchor {
@@ -97,6 +99,7 @@
 
     viewer[data-show-container="2"] #container2 {
       visibility: visible;
+      transform: none;
     }
 
     viewer[data-show-container="2"] #show-container2-anchor {
@@ -105,9 +108,19 @@
 
     viewer[data-show-container="3"] #container3 {
       visibility: visible;
+      transform: none;
     }
 
     viewer[data-show-container="3"] #show-container3-anchor {
+      text-decoration: underline;
+    }
+
+    viewer[data-show-container="4"] #container4 {
+      visibility: visible;
+      transform: none;
+    }
+
+    viewer[data-show-container="4"] #show-container4-anchor {
       text-decoration: underline;
     }
 
@@ -143,6 +156,7 @@
       this.viewportType_ = 'natural';
       this.visibilityState_ = visible ? 'visible' : 'hidden';
       this.prerenderSize_ = 1;
+      this.csi_ = 1;
 
       this.isIos_ = /iPhone|iPad|iPod/i.test(window.navigator.userAgent);
 
@@ -189,7 +203,8 @@
         visibilityState: this.visibilityState_,
         prerenderSize: this.prerenderSize_,
         viewerorigin: parseUrl(window.location.href).origin,
-        csi: 0
+        csi: this.csi_,
+        cap: 'foo,a2a',
       };
       log('Params:' + JSON.stringify(params));
 
@@ -395,6 +410,24 @@
       if (type == 'setFlushParams') {
         return;
       }
+      if (type == 'prerenderComplete') {
+        return;
+      }
+      if (type == 'tick') {
+        log('[CSI] tick. label:', data.label);
+        return;
+      }
+      if (type == 'sendCsi') {
+        log('[CSI] sendCsi.');
+        return;
+      }
+      if (type == 'scroll') {
+        return;
+      }
+      if (type == 'a2a') {
+        log('a2a navigation', data);
+        return;
+      }
       return Promise.reject('request not supported: ' + type);
     };
 
@@ -469,6 +502,13 @@
           false).start();
       addShowContainer('3');
 
+      new Viewer(
+          'container4',
+          '4',
+          'http://localhost:8000/examples.build/alp.amp.max.html',
+          false).start();
+      addShowContainer('4');
+
       showContainer('1');
     }
 
@@ -498,6 +538,7 @@
       <a class="show-container-anchor" id="show-container1-anchor">One</a>
       <a class="show-container-anchor" id="show-container2-anchor">Two</a>
       <a class="show-container-anchor" id="show-container3-anchor">Three</a>
+      <a class="show-container-anchor" id="show-container4-anchor">ALP</a>
       <a>|</a>
       <a id="visibilityToggle">Visible</a>
     </header>
@@ -512,6 +553,11 @@
       </div>
     </container>
     <container id="container3">
+      <div class="wait">
+        Please wait, the AMP doc will appear here...
+      </div>
+    </container>
+    <container id="container4">
       <div class="wait">
         Please wait, the AMP doc will appear here...
       </div>

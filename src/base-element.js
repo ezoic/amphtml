@@ -50,16 +50,12 @@ import {vsyncFor} from './vsync';
  *           || firstAttachedCallback
  *           ||
  *           \/
- *    State: <NOT BUILT>             <=
- *           ||                       ||
- *           || isReadyToBuild?  ======
- *           ||
- *           \/
  *    State: <NOT BUILT>
  *           ||
  *           || buildCallback
  *           || !getPlaceholder() => createPlaceholderCallback
- *           || preconnectCallback may be called N times after this.
+ *           || preconnectCallback may be called N times after this, but only
+ *           || after the doc becomes visible.
  *           || pauseCallback may be called N times after this.
  *           || resumeCallback may be called N times after this.
  *           ||
@@ -120,6 +116,18 @@ export class BaseElement {
   constructor(element) {
     /** @public @const */
     this.element = element;
+    /*
+         \   \  /  \  /   / /   \     |   _  \     |  \ |  | |  | |  \ |  |  /  _____|
+     \   \/    \/   / /  ^  \    |  |_)  |    |   \|  | |  | |   \|  | |  |  __
+      \            / /  /_\  \   |      /     |  . `  | |  | |  . `  | |  | |_ |
+       \    /\    / /  _____  \  |  |\  \----.|  |\   | |  | |  |\   | |  |__| |
+        \__/  \__/ /__/     \__\ | _| `._____||__| \__| |__| |__| \__|  \______|
+
+    Any private property for BaseElement should be declared in
+    build-system/amp.extern.js, this is so closure compiler doesn't reuse the
+    same symbol it would use in the core compilation unit for the private
+    property in the extensions compilation unit's private properties.
+     */
 
     /** @package {!Layout} */
     this.layout_ = Layout.NODISPLAY;
@@ -130,14 +138,17 @@ export class BaseElement {
     /** @package {boolean} */
     this.inViewport_ = false;
 
+    /** @public @const {!Window}  */
+    this.win = element.ownerDocument.defaultView;
+
     /** @private {!Object<string, function(!./service/action-impl.ActionInvocation)>} */
-    this.actionMap_ = this.getWin().Object.create(null);
+    this.actionMap_ = this.win.Object.create(null);
 
     /** @protected {!./preconnect.Preconnect} */
-    this.preconnect = preconnectFor(this.getWin());
+    this.preconnect = preconnectFor(this.win);
 
     /** @private {!./service/resources-impl.Resources}  */
-    this.resources_ = resourcesFor(this.getWin());
+    this.resources_ = resourcesFor(this.win);
   }
 
   /**
@@ -155,14 +166,17 @@ export class BaseElement {
     return this.layout_;
   }
 
-  /** @protected @return {!Window} */
+  /**
+   * DO NOT CALL. Retained for backward compat during rollout.
+   * @protected @return {!Window}
+   */
   getWin() {
-    return this.element.ownerDocument.defaultView;
+    return this.win;
   }
 
   /** @protected @return {!./service/vsync-impl.Vsync} */
   getVsync() {
-    return vsyncFor(this.getWin());
+    return vsyncFor(this.win);
   }
 
   /**
@@ -206,6 +220,24 @@ export class BaseElement {
   }
 
   /**
+   * This method is called when the element is added to DOM for the first time
+   * and before `buildCallback` to give the element a chance to redirect its
+   * implementation to another `BaseElement` implementation. The returned
+   * value can be either `null` or `undefined` to indicate that no redirection
+   * will take place; `BaseElement` instance to upgrade immediately; or a
+   * promise to upgrade with the resolved `BaseElement` instance.
+   *
+   * Notice that calls to `upgradeCallback` are not recursive. I.e. this
+   * callback will not be called on the returned instance again.
+   *
+   * @return {!BaseElement|!Promise<!BaseElement>|null}
+   */
+  upgradeCallback() {
+    // Subclasses may override.
+    return null;
+  }
+
+  /**
    * Called when the element is first created. Note that for element created
    * using createElement this may be before any children are added.
    */
@@ -223,32 +255,13 @@ export class BaseElement {
   }
 
   /**
-   * Override in subclass to indicate if the element is ready to rebuild its
-   * DOM subtree.  If the element can proceed with building the content return
-   * "true" and return "false" otherwise. The element may not be ready to build
-   * e.g. because its children are not available yet.
-   *
-   * See {@link buildCallback} for more details.
-   *
-   * @return {boolean}
-   */
-  isReadyToBuild() {
-    // Subclasses may override.
-    return true;
-  }
-
-  /**
    * Override in subclass if the element needs to rebuilt its DOM content.
    * Until the element has been rebuilt its content are not shown with an only
    * exception of [placeholder] elements. From the moment the element is created
    * and until the building phase is complete it will have "amp-notbuilt" CSS
    * class set on it.
    *
-   * This callback is executed early after the element has been attached to DOM
-   * if "isReadyToBuild" callback returns "true" or its called later upon the
-   * determination of Resources manager but definitely before first
-   * "layoutCallback" is called. Notice that "isReadyToBuild" call is not
-   * consulted in the later case.
+   * This callback is executed early after the element has been attached to DOM.
    */
   buildCallback() {
     // Subclasses may override.
@@ -563,7 +576,7 @@ export class BaseElement {
    * @return {!./service/viewport-impl.Viewport}
    */
   getViewport() {
-    return viewportFor(this.getWin());
+    return viewportFor(this.win);
   }
 
  /**
@@ -594,6 +607,14 @@ export class BaseElement {
   }
 
   /**
+   * @param {!Element|!Array<!Element>} elements
+   * @protected
+   */
+  scheduleResume(elements) {
+    this.resources_.scheduleResume(this.element, elements);
+  }
+
+  /**
    * Schedule the preload request for the children element or elements
    * specified. Resource manager will perform the actual preload based on the
    * priority of this element and its children.
@@ -603,6 +624,14 @@ export class BaseElement {
    */
   schedulePreload(elements) {
     this.resources_.schedulePreload(this.element, elements);
+  }
+
+  /**
+   * @param {!Element|!Array<!Element>} elements
+   * @protected
+   */
+  scheduleUnlayout(elements) {
+    this.resources_./*OK*/scheduleUnlayout(this.element, elements);
   }
 
   /**
@@ -621,52 +650,51 @@ export class BaseElement {
    * Requests the runtime to update the height of this element to the specified
    * value. The runtime will schedule this request and attempt to process it
    * as soon as possible.
-   * When the height is successfully updated then the opt_callback is called.
    * @param {number} newHeight
-   * @param {function()=} opt_callback A callback function.
    * @protected
    */
-  changeHeight(newHeight, opt_callback) {
+  changeHeight(newHeight) {
     this.resources_./*OK*/changeSize(
-        this.element, newHeight, /* newWidth */ undefined, opt_callback);
+        this.element, newHeight, /* newWidth */ undefined);
   }
 
   /**
-   * Requests the runtime to update the height of this element to the specified
-   * value. The runtime will schedule this request and attempt to process it
+   * Return a promise that requests the runtime to update
+   * the height of this element to the specified value.
+   * The runtime will schedule this request and attempt to process it
    * as soon as possible. However, unlike in {@link changeHeight}, the runtime
    * may refuse to make a change in which case it will show the element's
    * overflow element if provided, which is supposed to provide the reader with
    * the necessary user action. (The overflow element is shown only if the
    * requested height is greater than 0.)
-   * If the height is successfully updated then the opt_callback is called.
+   * The promise is resolved if the height is successfully updated.
    * @param {number} newHeight
-   * @param {function()=} opt_callback A callback function.
+   * @return {!Promise}
    * @protected
    */
-  attemptChangeHeight(newHeight, opt_callback) {
-    this.resources_.attemptChangeSize(
-        this.element, newHeight, /* newWidth */ undefined, opt_callback);
+  attemptChangeHeight(newHeight) {
+    return this.resources_.attemptChangeSize(this.element, newHeight,
+        /* newWidth */ undefined);
   }
 
  /**
-  * Requests the runtime to update the size of this element to the specified
-  * values. The runtime will schedule this request and attempt to process it
+  * Return a promise that requests the runtime to update
+  * the size of this element to the specified value.
+  * The runtime will schedule this request and attempt to process it
   * as soon as possible. However, unlike in {@link changeSize}, the runtime
   * may refuse to make a change in which case it will show the element's
   * overflow element if provided, which is supposed to provide the reader with
   * the necessary user action. (The overflow element is shown only if the
   * requested height is greater than 0.)
-  * If the height is successfully updated then the opt_callback is called.
+  * The promise is resolved if the height is successfully updated.
   * @param {number|undefined} newHeight
   * @param {number|undefined} newWidth
-  * @param {function()=} opt_callback A callback function.
+  * @return {!Promise}
   * @protected
   */
- attemptChangeSize(newHeight, newWidth, opt_callback) {
-   this.resources_.attemptChangeSize(
-       this.element, newHeight, newWidth, opt_callback);
- }
+  attemptChangeSize(newHeight, newWidth) {
+    return this.resources_.attemptChangeSize(this.element, newHeight, newWidth);
+  }
 
  /**
   * Runs the specified mutation on the element and ensures that measures
@@ -702,7 +730,7 @@ export class BaseElement {
    * TODO(dvoytenko, #3406): Remove as deprecated.
    */
   requestFullOverlay() {
-    viewerFor(this.getWin()).requestFullOverlay();
+    viewerFor(this.win).requestFullOverlay();
   }
 
   /**
@@ -712,7 +740,25 @@ export class BaseElement {
    * TODO(dvoytenko, #3406): Remove as deprecated.
    */
   cancelFullOverlay() {
-    viewerFor(this.getWin()).cancelFullOverlay();
+    viewerFor(this.win).cancelFullOverlay();
+  }
+
+  /**
+   * Collapses the element, setting it to `display: none`, and notifies its
+   * owner (if there is one) through {@link collapsedCallback} that the element
+   * is no longer visible.
+   */
+  collapse() {
+    this.resources_.collapseElement(this.element);
+  }
+
+  /**
+   * Called every time an owned AmpElement collapses itself.
+   * See {@link collapse}.
+   * @param {!AmpElement} unusedElement
+   */
+  collapsedCallback(unusedElement) {
+    // Subclasses may override.
   }
 
   /**
@@ -723,15 +769,4 @@ export class BaseElement {
    * @protected
    */
   onLayoutMeasure() {}
-
-  /**
-   * Called after a overflowCallback is triggered on an element.
-   * @param {boolean} unusedOverflown
-   * @param {number|undefined} unusedRequestedHeight
-   * @param {number|undefined} unusedRequestedWidth
-   */
-  overflowCallback(
-      unusedOverflown,
-      unusedRequestedHeight,
-      unusedRequestedWidth) {}
 };

@@ -70,6 +70,7 @@ describe('DOM', () => {
     element.appendChild(child);
 
     expect(dom.closest(child, () => true)).to.equal(child);
+    expect(dom.closestNode(child, () => true)).to.equal(child);
     expect(dom.closestByTag(child, 'div')).to.equal(child);
     expect(dom.closestByTag(child, 'DIV')).to.equal(child);
   });
@@ -84,13 +85,31 @@ describe('DOM', () => {
     element.appendChild(child);
 
     expect(dom.closest(child, e => e.tagName == 'CHILD')).to.equal(child);
+    expect(dom.closestNode(child, e => e.tagName == 'CHILD')).to.equal(child);
     expect(dom.closestByTag(child, 'child')).to.equal(child);
 
     expect(dom.closest(child, e => e.tagName == 'ELEMENT')).to.equal(element);
+    expect(dom.closestNode(child, e => e.tagName == 'ELEMENT'))
+        .to.equal(element);
     expect(dom.closestByTag(child, 'element')).to.equal(element);
 
     expect(dom.closest(child, e => e.tagName == 'PARENT')).to.equal(parent);
+    expect(dom.closestNode(child, e => e.tagName == 'PARENT')).to.equal(parent);
     expect(dom.closestByTag(child, 'parent')).to.equal(parent);
+  });
+
+  it('closestNode should find nodes as well as elements', () => {
+    const fragment = document.createDocumentFragment();
+
+    const element = document.createElement('div');
+    fragment.appendChild(element);
+
+    const text = document.createTextNode('abc');
+    element.appendChild(text);
+
+    expect(dom.closestNode(text, () => true)).to.equal(text);
+    expect(dom.closestNode(text, n => n.nodeType == 1)).to.equal(element);
+    expect(dom.closestNode(text, n => n.nodeType == 11)).to.equal(fragment);
   });
 
   it('closest should find first match', () => {
@@ -184,6 +203,33 @@ describe('DOM', () => {
   it('childElementByTag should find first match (polyfill)', () => {
     dom.setScopeSelectorSupportedForTesting(false);
     testChildElementByTag();
+  });
+
+  function testChildElementsByTag() {
+    const parent = document.createElement('parent');
+
+    const element1 = document.createElement('element1');
+    parent.appendChild(element1);
+
+    const element2 = document.createElement('element23');
+    parent.appendChild(element2);
+
+    const element3 = document.createElement('element23');
+    parent.appendChild(element3);
+
+    expect(dom.childElementsByTag(parent, 'element1'))
+        .to.deep.equal([element1]);
+    expect(dom.childElementsByTag(parent, 'element23'))
+        .to.deep.equal([element2, element3]);
+    expect(dom.childElementsByTag(parent, 'element3'))
+        .to.deep.equal([]);
+  }
+
+  it('childElementsByTag should find first match', testChildElementsByTag);
+
+  it('childElementsByTag should find first match (polyfill)', () => {
+    dom.setScopeSelectorSupportedForTesting(false);
+    testChildElementsByTag();
   });
 
   function testChildElementByAttr() {
@@ -591,6 +637,32 @@ describe('DOM', () => {
       const res = dom.openWindowDialog(windowApi, 'https://example.com/',
           '_top', 'width=1');
       expect(res).to.be.null;
+    });
+  });
+
+  describe('isJsonScriptTag', () => {
+    it('should return true for <script type="application/json">', () => {
+      const element = document.createElement('script');
+      element.setAttribute('type', 'application/json');
+      expect(dom.isJsonScriptTag(element)).to.be.true;
+    });
+
+    it('should return true for <script type="aPPLication/jSon">', () => {
+      const element = document.createElement('script');
+      element.setAttribute('type', 'aPPLication/jSon');
+      expect(dom.isJsonScriptTag(element)).to.be.true;
+    });
+
+    it('should return false for <script type="text/javascript">', () => {
+      const element = document.createElement('script');
+      element.setAttribute('type', 'text/javascript');
+      expect(dom.isJsonScriptTag(element)).to.be.false;
+    });
+
+    it('should return false for <div type="application/json">', () => {
+      const element = document.createElement('div');
+      element.setAttribute('type', 'application/json');
+      expect(dom.isJsonScriptTag(element)).to.be.false;
     });
   });
 });

@@ -15,9 +15,9 @@
 #
 
 tags: {  # amp-jwplayer
-  tag_name: "script"
+  tag_name: "SCRIPT"
   spec_name: "amp-jwplayer extension .js script"
-  mandatory_parent: "head"
+  mandatory_parent: "HEAD"
   attrs: {
     name: "async"
     mandatory: true
@@ -44,13 +44,11 @@ tags: {  # amp-jwplayer
       error_message: "contents"
     }
   }
-  # TODO(honeybadgerdontcare): Replace me with an ampproject.org URL eventually.
-  spec_url: "https://github.com/ampproject/amphtml/blob/master/extensions/amp-jwplayer/amp-jwplayer.md"
+  spec_url: "https://www.ampproject.org/docs/reference/extended/amp-jwplayer.html"
 }
 tags: {  # <amp-jwplayer>
-  tag_name: "amp-jwplayer"
-  disallowed_ancestor: "head"
-  disallowed_ancestor: "amp-sidebar"
+  tag_name: "AMP-JWPLAYER"
+  disallowed_ancestor: "AMP-SIDEBAR"
   also_requires_tag: "amp-jwplayer extension .js script"
   attrs: {
     name: "data-media-id"
@@ -67,8 +65,7 @@ tags: {  # <amp-jwplayer>
     mandatory_oneof: "data-media-id or data-playlist-id"
     value_regex_casei: "[0-9a-z]{8}"
   }
-  # TODO(honeybadgerdontcare): Replace me with an ampproject.org URL eventually.
-  spec_url: "https://github.com/ampproject/amphtml/blob/master/extensions/amp-jwplayer/amp-jwplayer.md"
+  spec_url: "https://www.ampproject.org/docs/reference/extended/amp-jwplayer.html"
  amp_layout: {
     supported_layouts: FILL
     supported_layouts: FIXED

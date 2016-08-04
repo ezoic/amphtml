@@ -14,13 +14,17 @@
  * limitations under the License.
  */
 
+// Imported just for the side effect of getting the `types` it exports into
+// the type system during compile time.
+import './time';
+
 
 /**
  * A CurveDef is a function that returns a normtime value (0 to 1) for another
  * normtime value.
- * @typedef {function(normtime):normtime}
+ * @typedef {function(./time.normtimeDef): ./time.normtimeDef}
  */
-let CurveDef;
+export let CurveDef;
 
 
 /**
@@ -135,8 +139,9 @@ class Bezier {
     // Try gradient descent to solve for t. If it works, it is very fast.
     let tMin = 0;
     let tMax = 1;
+    let value = 0;
     for (let i = 0; i < 8; i++) {
-      const value = this.getPointX(t);
+      value = this.getPointX(t);
       const derivative = (this.getPointX(t + epsilon) - value) / epsilon;
       if (Math.abs(value - xVal) < epsilon) {
         return t;

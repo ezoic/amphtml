@@ -14,10 +14,9 @@
  * limitations under the License.
  */
 
-import {isExperimentOn} from '../../../src/experiments';
 import {isVisibilitySpecValid} from './visibility-impl';
 import {Observable} from '../../../src/observable';
-import {getService} from '../../../src/service';
+import {fromClass} from '../../../src/service';
 import {timer} from '../../../src/timer';
 import {user} from '../../../src/log';
 import {viewerFor} from '../../../src/viewer';
@@ -213,7 +212,7 @@ export class InstrumentationService {
    * @private
    */
   createVisibilityListener_(callback, config) {
-    if (config['visibilitySpec'] && this.isViewabilityExperimentOn_()) {
+    if (config['visibilitySpec']) {
       if (!isVisibilitySpecValid(config)) {
         return;
       }
@@ -232,7 +231,10 @@ export class InstrumentationService {
     }
   }
 
-  /** @private {function()} fn function to run or schedule. */
+  /**
+   * @param {function()} fn function to run or schedule.
+   * @private
+   */
   runOrSchedule_(fn) {
     if (this.viewer_.isVisible()) {
       fn();
@@ -456,13 +458,6 @@ export class InstrumentationService {
     this.win_.setTimeout(this.win_.clearInterval.bind(this.win_, intervalId),
         maxTimerLength * 1000);
   }
-
-  /**
-   * @return {boolean} True if the experiment is on. False otherwise.
-   */
-  isViewabilityExperimentOn_() {
-    return isExperimentOn(this.win_, 'amp-analytics-viewability');
-  }
 }
 
 /**
@@ -470,8 +465,6 @@ export class InstrumentationService {
  * @return {!InstrumentationService}
  */
 export function instrumentationServiceFor(window) {
-  return getService(window, 'amp-analytics-instrumentation', () => {
-    return new InstrumentationService(window);
-  });
+  return fromClass(window, 'amp-analytics-instrumentation',
+      InstrumentationService);
 }
-

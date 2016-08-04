@@ -35,17 +35,9 @@ export class AmpSidebar extends AMP.BaseElement {
   }
 
   /** @override */
-  isReadyToBuild() {
-    return false;
-  }
-
-  /** @override */
   buildCallback() {
-    /** @private @const {!Window} */
-    this.win_ = this.getWin();
-
     /** @private @const {!Document} */
-    this.document_ = this.win_.document;
+    this.document_ = this.win.document;
 
     /** @private @const {!Element} */
     this.documentElement_ = this.document_.documentElement;
@@ -60,7 +52,7 @@ export class AmpSidebar extends AMP.BaseElement {
     this.maskElement_ = false;
 
     /** @const @private {!Vsync} */
-    this.vsync_ = vsyncFor(this.win_);
+    this.vsync_ = vsyncFor(this.win);
 
     /** @private @const {boolean} */
     this.isIosSafari_ = platform.isIos() && platform.isSafari();
@@ -134,6 +126,9 @@ export class AmpSidebar extends AMP.BaseElement {
    * @private
    */
   open_() {
+    if (this.isOpen_()) {
+      return;
+    }
     this.viewport_.disableTouchZoom();
     this.vsync_.mutate(() => {
       setStyles(this.element, {
@@ -150,7 +145,9 @@ export class AmpSidebar extends AMP.BaseElement {
         this.element.setAttribute('open', '');
         this.element.setAttribute('aria-hidden', 'false');
         timer.delay(() => {
-          this.scheduleLayout(this.getRealChildren());
+          const children = this.getRealChildren();
+          this.scheduleLayout(children);
+          this.scheduleResume(children);
         }, ANIMATION_TIMEOUT);
       });
     });
@@ -164,6 +161,9 @@ export class AmpSidebar extends AMP.BaseElement {
    * @private
    */
   close_() {
+    if (!this.isOpen_()) {
+      return;
+    }
     this.viewport_.restoreOriginalTouchZoom();
     this.vsync_.mutate(() => {
       this.closeMask_();
@@ -260,7 +260,7 @@ export class AmpSidebar extends AMP.BaseElement {
    * @private @return {!History}
    */
   getHistory_() {
-    return historyFor(this.win_);
+    return historyFor(this.win);
   }
 }
 

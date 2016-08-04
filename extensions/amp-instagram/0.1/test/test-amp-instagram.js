@@ -18,7 +18,7 @@ import {
   createIframePromise,
   doNotLoadExternalResourcesInTest,
 } from '../../../../testing/iframe';
-require('../amp-instagram');
+import '../amp-instagram';
 import {adopt} from '../../../../src/runtime';
 
 adopt(window);
@@ -46,6 +46,7 @@ describe('amp-instagram', () => {
         'https://www.instagram.com/p/fBwFP/media/?size=l');
     expect(image.getAttribute('layout')).to.equal('fill');
     expect(image.getAttribute('alt')).to.equal('Testing');
+    expect(image.getAttribute('referrerpolicy')).to.equal('origin');
   }
 
   function testIframe(iframe) {

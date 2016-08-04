@@ -30,12 +30,6 @@ class AmpLightbox extends AMP.BaseElement {
   }
 
   /** @override */
-  isReadyToBuild() {
-    // Always defer building until DOMReady.
-    return false;
-  }
-
-  /** @override */
   buildCallback() {
     st.setStyles(this.element, {
       position: 'fixed',
@@ -65,6 +59,9 @@ class AmpLightbox extends AMP.BaseElement {
 
     /** @private {number} */
     this.historyId_ = -1;
+
+    /** @private {boolean} */
+    this.active_ = false;
   }
 
   /** @override */
@@ -74,9 +71,12 @@ class AmpLightbox extends AMP.BaseElement {
 
   /** @override */
   activate() {
+    if (this.active_) {
+      return;
+    }
     /**  @private {function(this:AmpLightbox, Event)}*/
     this.boundCloseOnEscape_ = this.closeOnEscape_.bind(this);
-    this.getWin().document.documentElement.addEventListener(
+    this.win.document.documentElement.addEventListener(
         'keydown', this.boundCloseOnEscape_);
     this.getViewport().enterLightboxMode();
 
@@ -85,17 +85,20 @@ class AmpLightbox extends AMP.BaseElement {
       this.element.style.opacity = 0;
       // TODO(dvoytenko): use new animations support instead.
       this.element.style.transition = 'opacity 0.1s ease-in';
-      vsyncFor(this.getWin()).mutate(() => {
+      vsyncFor(this.win).mutate(() => {
         this.element.style.opacity = '';
       });
     }).then(() => {
       this.updateInViewport(this.container_, true);
       this.scheduleLayout(this.container_);
+      this.scheduleResume(this.container_);
     });
 
     this.getHistory_().push(this.close.bind(this)).then(historyId => {
       this.historyId_ = historyId;
     });
+
+    this.active_ = true;
   }
 
   /**
@@ -110,15 +113,19 @@ class AmpLightbox extends AMP.BaseElement {
   }
 
   close() {
+    if (!this.active_) {
+      return;
+    }
     this.getViewport().leaveLightboxMode();
     this.element.style.display = 'none';
     if (this.historyId_ != -1) {
       this.getHistory_().pop(this.historyId_);
     }
-    this.getWin().document.documentElement.removeEventListener(
+    this.win.document.documentElement.removeEventListener(
         'keydown', this.boundCloseOnEscape_);
     this.boundCloseOnEscape_ = null;
     this.schedulePause(this.container_);
+    this.active_ = false;
   }
 
   getHistory_() {

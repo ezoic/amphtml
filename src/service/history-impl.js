@@ -16,6 +16,7 @@
 
 import {Pass} from '../pass';
 import {getService} from '../service';
+import {getMode} from '../mode';
 import {dev} from '../log';
 import {timer} from '../timer';
 import {installViewerService} from './viewer-impl';
@@ -321,7 +322,7 @@ export class HistoryBindingNatural_ {
     history.pushState = this.historyPushState_.bind(this);
     history.replaceState = this.historyReplaceState_.bind(this);
 
-    const eventPass = new Pass(this.onHistoryEvent_.bind(this), 50);
+    const eventPass = new Pass(this.win, this.onHistoryEvent_.bind(this), 50);
     this.popstateHandler_ = e => {
       dev.fine(TAG_, 'popstate event: ' + this.win.history.length + ', ' +
           JSON.stringify(e.state));
@@ -642,7 +643,7 @@ export class HistoryBindingVirtual_ {
 function createHistory_(window) {
   const viewer = installViewerService(window);
   let binding;
-  if (viewer.isOvertakeHistory()) {
+  if (viewer.isOvertakeHistory() || getMode().test) {
     binding = new HistoryBindingVirtual_(viewer);
   } else {
     binding = new HistoryBindingNatural_(window);

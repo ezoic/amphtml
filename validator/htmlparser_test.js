@@ -51,6 +51,9 @@ class LoggingHandler extends amp.htmlparser.HtmlSaxHandler {
   endDoc() { this.log.push('endDoc()'); }
 
   /** @override */
+  markManufacturedBody() { this.log.push('markManufacturedBody()'); }
+
+  /** @override */
   startTag(tagName, attrs) {
     this.log.push('startTag(' + tagName + ',[' + attrs + '])');
   }
@@ -65,7 +68,8 @@ describe('HtmlParser', () => {
     const parser = new amp.htmlparser.HtmlParser();
     parser.parse(handler, 'hello world');
     expect(handler.log).toEqual([
-      'startDoc()', 'pcdata("hello world")', 'endDoc()'
+      'startDoc()', 'markManufacturedBody()', 'startTag(BODY,[])',
+      'pcdata("hello world")', 'endTag(BODY)', 'endDoc()'
     ]);
   });
 
@@ -74,7 +78,8 @@ describe('HtmlParser', () => {
     const parser = new amp.htmlparser.HtmlParser();
     parser.parse(handler, '<img src="hello.gif">');
     expect(handler.log).toEqual([
-      'startDoc()', 'startTag(img,[src,hello.gif])', 'endDoc()'
+      'startDoc()', 'markManufacturedBody()', 'startTag(BODY,[])',
+      'startTag(IMG,[src,hello.gif])', 'endTag(IMG)', 'endTag(BODY)', 'endDoc()'
     ]);
   });
 
@@ -83,8 +88,9 @@ describe('HtmlParser', () => {
     const parser = new amp.htmlparser.HtmlParser();
     parser.parse(handler, '<div><span>hello world</span></div>');
     expect(handler.log).toEqual([
-      'startDoc()', 'startTag(div,[])', 'startTag(span,[])',
-      'pcdata("hello world")', 'endTag(span)', 'endTag(div)', 'endDoc()'
+      'startDoc()', 'markManufacturedBody()', 'startTag(BODY,[])',
+      'startTag(DIV,[])', 'startTag(SPAN,[])', 'pcdata("hello world")',
+      'endTag(SPAN)', 'endTag(DIV)', 'endTag(BODY)', 'endDoc()'
     ]);
   });
 
@@ -93,7 +99,9 @@ describe('HtmlParser', () => {
     const parser = new amp.htmlparser.HtmlParser();
     parser.parse(handler, '<img src="hello.gif" width="400px">');
     expect(handler.log).toEqual([
-      'startDoc()', 'startTag(img,[src,hello.gif,width,400px])', 'endDoc()'
+      'startDoc()', 'markManufacturedBody()', 'startTag(BODY,[])',
+      'startTag(IMG,[src,hello.gif,width,400px])', 'endTag(IMG)',
+      'endTag(BODY)', 'endDoc()'
     ]);
   });
 
@@ -102,7 +110,9 @@ describe('HtmlParser', () => {
     const parser = new amp.htmlparser.HtmlParser();
     parser.parse(handler, '<input type=checkbox checked>');
     expect(handler.log).toEqual([
-      'startDoc()', 'startTag(input,[type,checkbox,checked,])', 'endDoc()'
+      'startDoc()', 'markManufacturedBody()', 'startTag(BODY,[])',
+      'startTag(INPUT,[type,checkbox,checked,])', 'endTag(INPUT)',
+      'endTag(BODY)', 'endDoc()'
     ]);
   });
 
@@ -111,7 +121,8 @@ describe('HtmlParser', () => {
     const parser = new amp.htmlparser.HtmlParser();
     parser.parse(handler, '<span>');
     expect(handler.log).toEqual([
-      'startDoc()', 'startTag(span,[])', 'endDoc()'
+      'startDoc()', 'markManufacturedBody()', 'startTag(BODY,[])',
+      'startTag(SPAN,[])', 'endTag(SPAN)', 'endTag(BODY)', 'endDoc()'
     ]);
   });
 
@@ -120,8 +131,9 @@ describe('HtmlParser', () => {
     const parser = new amp.htmlparser.HtmlParser();
     parser.parse(handler, '<span style="background-color: black;"></span>');
     expect(handler.log).toEqual([
-      'startDoc()', 'startTag(span,[style,background-color: black;])',
-      'endTag(span)', 'endDoc()'
+      'startDoc()', 'markManufacturedBody()', 'startTag(BODY,[])',
+      'startTag(SPAN,[style,background-color: black;])', 'endTag(SPAN)',
+      'endTag(BODY)', 'endDoc()'
     ]);
   });
 
@@ -130,8 +142,9 @@ describe('HtmlParser', () => {
     const parser = new amp.htmlparser.HtmlParser();
     parser.parse(handler, '<script><![CDATA[alert("hey");]]><\/script>');
     expect(handler.log).toEqual([
-      'startDoc()', 'startTag(script,[])', 'cdata("<![CDATA[alert("hey");]]>")',
-      'endTag(script)', 'endDoc()'
+      'startDoc()', 'startTag(HEAD,[])', 'startTag(SCRIPT,[])',
+      'cdata("<![CDATA[alert("hey");]]>")', 'endTag(SCRIPT)', 'endTag(HEAD)',
+      'endDoc()'
     ]);
   });
 
@@ -140,8 +153,10 @@ describe('HtmlParser', () => {
     const parser = new amp.htmlparser.HtmlParser();
     parser.parse(handler, '<img><p>hello<img><div/></p>');
     expect(handler.log).toEqual([
-      'startDoc()', 'startTag(img,[])', 'startTag(p,[])', 'pcdata("hello")',
-      'startTag(img,[])', 'startTag(div,[])', 'endTag(p)', 'endDoc()'
+      'startDoc()', 'markManufacturedBody()', 'startTag(BODY,[])',
+      'startTag(IMG,[])', 'endTag(IMG)', 'startTag(P,[])', 'pcdata("hello")',
+      'startTag(IMG,[])', 'endTag(IMG)', 'startTag(DIV,[])', 'endTag(DIV)',
+      'endTag(P)', 'endTag(BODY)', 'endDoc()'
     ]);
   });
 
@@ -151,8 +166,11 @@ describe('HtmlParser', () => {
     parser.parse(handler, '<div/>');
     parser.parse(handler, '<div/>');
     expect(handler.log).toEqual([
-      'startDoc()', 'startTag(div,[])', 'endDoc()', 'startDoc()',
-      'startTag(div,[])', 'endDoc()'
+      'startDoc()', 'markManufacturedBody()', 'startTag(BODY,[])',
+      'startTag(DIV,[])', 'endTag(DIV)', 'endTag(BODY)', 'endDoc()',
+      'startDoc()', 'markManufacturedBody()', 'startTag(BODY,[])',
+      'startTag(DIV,[])', 'endTag(DIV)', 'endTag(BODY)', 'endDoc()'
+
     ]);
   });
 
@@ -161,7 +179,8 @@ describe('HtmlParser', () => {
     const parser = new amp.htmlparser.HtmlParser();
     parser.parse(handler, '<div><!-- this is a comment --></div>');
     expect(handler.log).toEqual([
-      'startDoc()', 'startTag(div,[])', 'endTag(div)', 'endDoc()'
+      'startDoc()', 'markManufacturedBody()', 'startTag(BODY,[])',
+      'startTag(DIV,[])', 'endTag(DIV)', 'endTag(BODY)', 'endDoc()'
     ]);
   });
 
@@ -172,9 +191,10 @@ describe('HtmlParser', () => {
         handler, '<a-tag><more-tags>' +
             '<custom foo="Hello">world.</more-tags></a-tag>');
     expect(handler.log).toEqual([
-      'startDoc()', 'startTag(a-tag,[])', 'startTag(more-tags,[])',
-      'startTag(custom,[foo,Hello])', 'pcdata("world.")', 'endTag(more-tags)',
-      'endTag(a-tag)', 'endDoc()'
+      'startDoc()', 'markManufacturedBody()', 'startTag(BODY,[])',
+      'startTag(A-TAG,[])', 'startTag(MORE-TAGS,[])',
+      'startTag(CUSTOM,[foo,Hello])', 'pcdata("world.")', 'endTag(CUSTOM)',
+      'endTag(MORE-TAGS)', 'endTag(A-TAG)', 'endTag(BODY)', 'endDoc()'
     ]);
   });
 
@@ -184,7 +204,8 @@ describe('HtmlParser', () => {
     // Note the two double quotes at the end of the tag.
     parser.parse(handler, '<a href="foo.html""></a>');
     expect(handler.log).toEqual([
-      'startDoc()', 'startTag(a,[href,foo.html,",])', 'endTag(a)', 'endDoc()'
+      'startDoc()', 'markManufacturedBody()', 'startTag(BODY,[])',
+      'startTag(A,[href,foo.html,",])', 'endTag(A)', 'endTag(BODY)', 'endDoc()'
     ]);
   });
 });
@@ -198,7 +219,7 @@ class LoggingHandlerWithLocation extends
     super();
     /** @type {amp.htmlparser.DocLocator} */
     this.locator = null;
-    /** @type {!Array<!string>} */
+    /** @type {!Array<string>} */
     this.log = [];
   }
 
@@ -270,11 +291,11 @@ describe('HtmlParser with location', () => {
             '  </body>\n' +
             '</html>');
     expect(handler.log).toEqual([
-      ':1:0: startDoc()', ':1:0: startTag(html,[])', ':1:5: pcdata("\n  ")',
-      ':2:2: startTag(body,[])', ':2:7: pcdata("\n    ")',
-      ':3:4: startTag(div,[style,foo])', ':3:18: pcdata("Oh hi!")',
-      ':3:25: endTag(div)', ':3:30: pcdata("\n  ")', ':4:2: endTag(body)',
-      ':4:8: pcdata("\n")', ':5:0: endTag(html)', ':5:6: endDoc()'
+      ':1:0: startDoc()', ':1:0: startTag(HTML,[])', ':1:5: pcdata("\n  ")',
+      ':2:2: startTag(BODY,[])', ':2:7: pcdata("\n    ")',
+      ':3:4: startTag(DIV,[style,foo])', ':3:18: pcdata("Oh hi!")',
+      ':3:25: endTag(DIV)', ':3:30: pcdata("\n  ")', ':4:8: pcdata("\n")',
+      ':5:0: endTag(BODY)', ':5:0: endTag(HTML)', ':5:6: endDoc()'
     ]);
   });
 
@@ -302,25 +323,25 @@ describe('HtmlParser with location', () => {
             '</html>');
     expect(handler.log).toEqual([
       ':1:0: startDoc()',
-      ':1:0: startTag(html,[])',
+      ':1:0: startTag(HTML,[])',
       ':1:5: pcdata("\n  ")',
-      ':2:2: startTag(body,[])',
+      ':2:2: startTag(BODY,[])',
       ':2:7: pcdata("\n    ")',
-      ':3:4: startTag(p,[])',
+      ':3:4: startTag(P,[])',
       ':3:6: pcdata("\n      ")',
-      ':4:6: startTag(a-custom,[])',
+      ':4:6: startTag(A-CUSTOM,[])',
       ':4:15: pcdata("\n        ")',
-      ':5:8: startTag(div,[style,foo])',
+      ':5:8: startTag(DIV,[style,foo])',
       ':5:22: pcdata("Oh hi!")',
-      ':5:29: endTag(div)',
+      ':5:29: endTag(DIV)',
       ':5:34: pcdata("\n      ")',
-      ':6:6: endTag(a-custom)',
+      ':6:6: endTag(A-CUSTOM)',
       ':6:16: pcdata("\n    ")',
-      ':7:4: endTag(p)',
+      ':7:4: endTag(P)',
       ':7:7: pcdata("\n  ")',
-      ':8:2: endTag(body)',
       ':8:8: pcdata("\n")',
-      ':9:0: endTag(html)',
+      ':9:0: endTag(BODY)',
+      ':9:0: endTag(HTML)',
       ':9:6: endDoc()'
     ]);
   });
@@ -349,9 +370,9 @@ describe('HtmlParser with location', () => {
             '</body>\n' +
             '</html>');
     expect(handler.log).toEqual([
-      ':1:0: startDoc()', ':1:0: startTag(html,[])', ':1:5: pcdata("\n")',
-      ':2:0: startTag(body,[])', ':2:5: pcdata("\n")',
-      ':3:0: startTag(script,[type,application/json])', ':3:0: cdata("\n' +
+      ':1:0: startDoc()', ':1:0: startTag(HTML,[])', ':1:5: pcdata("\n")',
+      ':2:0: startTag(BODY,[])', ':2:5: pcdata("\n")',
+      ':3:0: startTag(SCRIPT,[type,application/json])', ':3:0: cdata("\n' +
           '{\n' +
           '"vars": {\n' +
           '"account": "UA-XXXX-Y"\n' +
@@ -363,10 +384,10 @@ describe('HtmlParser with location', () => {
           '}\n' +
           '}\n' +
           '")',
-      ':14:0: endTag(script)', ':14:8: pcdata("\n")',
-      ':15:0: startTag(amp-analytics,[])', ':15:15: endTag(amp-analytics)',
-      ':15:30: pcdata("\n")', ':16:0: endTag(body)', ':16:6: pcdata("\n")',
-      ':17:0: endTag(html)', ':17:6: endDoc()'
+      ':14:0: endTag(SCRIPT)', ':14:8: pcdata("\n")',
+      ':15:0: startTag(AMP-ANALYTICS,[])', ':15:15: endTag(AMP-ANALYTICS)',
+      ':15:30: pcdata("\n")', ':16:6: pcdata("\n")', ':17:0: endTag(BODY)',
+      ':17:0: endTag(HTML)', ':17:6: endDoc()'
     ]);
   });
 
@@ -388,17 +409,33 @@ describe('HtmlParser with location', () => {
             '<body>İ</body>\n' +
             '</html>');
     expect(handler.log).toEqual([
-      ':1:0: startDoc()', ':1:0: startTag(!doctype,[html,])',
-      ':1:14: pcdata("\n")', ':2:0: startTag(html,[amp,,lang,tr])',
-      ':2:19: pcdata("\n")', ':3:0: startTag(head,[])', ':3:5: pcdata("\n")',
-      ':4:0: startTag(meta,[charset,utf-8])', ':4:21: pcdata("\n")',
-      ':5:0: startTag(title,[])', ':5:0: rcdata("")', ':5:7: endTag(title)',
-      ':5:14: pcdata("\n")', ':6:0: startTag(script,[async,,src,' +
-          'https://cdn.ampproject.org/v0.js])',
-      ':6:0: cdata("")', ':6:53: endTag(script)', ':6:61: pcdata("\n")',
-      ':7:0: endTag(head)', ':7:6: pcdata("\n")', ':8:0: startTag(body,[])',
-      ':8:5: pcdata("İ")', ':8:7: endTag(body)', ':8:13: pcdata("\n")',
-      ':9:0: endTag(html)', ':9:6: endDoc()'
+      ':1:0: startDoc()',
+      ':1:0: startTag(!DOCTYPE,[html,])',
+      ':1:14: pcdata("\n")',
+      ':2:0: startTag(HTML,[amp,,lang,tr])',
+      ':2:19: pcdata("\n")',
+      ':3:0: startTag(HEAD,[])',
+      ':3:5: pcdata("\n")',
+      ':4:0: startTag(META,[charset,utf-8])',
+      ':4:0: endTag(META)',
+      ':4:21: pcdata("\n")',
+      ':5:0: startTag(TITLE,[])',
+      ':5:0: rcdata("")',
+      ':5:7: endTag(TITLE)',
+      ':5:14: pcdata("\n")',
+      ':6:0: startTag(SCRIPT,[async,,src,https://cdn.ampproject.org/v0.js])',
+      ':6:0: cdata("")',
+      ':6:53: endTag(SCRIPT)',
+      ':6:61: pcdata("\n")',
+      ':7:0: endTag(HEAD)',
+      ':7:6: pcdata("\n")',
+      ':8:0: startTag(BODY,[])',
+      ':8:5: pcdata("İ")',
+      ':8:13: pcdata("\n")',
+      ':9:0: endTag(BODY)',
+      ':9:0: endTag(HTML)',
+      ':9:6: endTag(!DOCTYPE)',
+      ':9:6: endDoc()'
     ]);
   });
 });

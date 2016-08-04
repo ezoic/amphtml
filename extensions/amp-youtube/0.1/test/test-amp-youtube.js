@@ -18,7 +18,7 @@ import {
   createIframePromise,
   doNotLoadExternalResourcesInTest,
 } from '../../../../testing/iframe';
-require('../amp-youtube');
+import '../amp-youtube';
 import {adopt} from '../../../../src/runtime';
 import {timer} from '../../../../src/timer';
 import * as sinon from 'sinon';
@@ -102,6 +102,7 @@ describe('amp-youtube', function() {
       expect(imgPlaceholder.className).to.not.match(/amp-hidden/);
       expect(imgPlaceholder.src).to.be.equal(
           'https://i.ytimg.com/vi/mGENRKrdoGY/sddefault.jpg#404_is_fine');
+      expect(imgPlaceholder.getAttribute('referrerpolicy')).to.equal('origin');
     }).then(yt => {
       const iframe = yt.querySelector('iframe');
       expect(iframe).to.not.be.null;
@@ -119,12 +120,14 @@ describe('amp-youtube', function() {
       const imgPlaceholder = yt.querySelector('img[placeholder]');
       expect(imgPlaceholder).to.not.be.null;
       expect(imgPlaceholder.className).to.not.match(/amp-hidden/);
+      expect(imgPlaceholder.getAttribute('referrerpolicy')).to.equal('origin');
     }).then(yt => {
       const iframe = yt.querySelector('iframe');
       expect(iframe).to.not.be.null;
 
       const imgPlaceholder = yt.querySelector('img[placeholder]');
       expect(imgPlaceholder.className).to.match(/amp-hidden/);
+      expect(imgPlaceholder.getAttribute('referrerpolicy')).to.equal('origin');
 
       expect(imgPlaceholder.src).to.equal(
           'https://i.ytimg.com/vi/mGENRKrdoGY/sddefault.jpg#404_is_fine');
@@ -181,6 +184,19 @@ describe('amp-youtube', function() {
       });
 
       expect(yt.implementation_.playerState_).to.equal(1);
+
+      // YouTube Player sometimes sends parsed-JSON data. Test that we're
+      // handling it correctly.
+      yt.implementation_.handleYoutubeMessages_({
+        origin: 'https://www.youtube.com',
+        source: iframe.contentWindow,
+        data: {
+          event: 'infoDelivery',
+          info: {playerState: 2},
+        },
+      });
+
+      expect(yt.implementation_.playerState_).to.equal(2);
     });
 
   });
@@ -210,8 +226,9 @@ describe('amp-youtube', function() {
       'data-param-my-param': 'hello world',
     }).then(yt => {
       const iframe = yt.querySelector('iframe');
-      expect(iframe.src).to.contain('autoplay=1');
       expect(iframe.src).to.contain('myParam=hello%20world');
+      // autoplay is temporarily black listed.
+      expect(iframe.src).to.not.contain('autoplay=1');
     });
   });
 });

@@ -125,6 +125,12 @@ Type attribute value: `comscore`
 
 Adds support for comScore Unified Digital Measurement™ pageview analytics. Requires defining *var* `c2` with comScore-provided *c2 id*.
 
+### Cxense
+
+Type attribute value: `cxense`
+
+Adds support for Cxense Insight analytics. Requires defining *var* `siteId` with Cxense-provided *siteId*. More details can be found at [wiki.cxense.com](https://wiki.cxense.com/display/cust/Accelerated+Mobile+Pages+%28AMP%29+integration).
+
 ### Google Analytics
 
 Type attribute value: `googleanalytics`
@@ -170,6 +176,12 @@ Type attribute value: `mediametrie`
 
 Adds support for Médiamétrie tracking pages. Requires defining *var* `serial`. Vars `level1` to `level4` are optional.
 
+### mParticle
+
+Type attribute value: `mparticle`
+
+Adds support for mParticle. More details for adding mParticle support can be found at [docs.mparticle.com](http://docs.mparticle.com/?javascript#amp).
+
 ### OEWA
 
 Type attribute value: `oewa`
@@ -196,7 +208,7 @@ Type attribute value: `parsely`
 
 Adds support for Parsely. Configuration details can be found at [parsely.com/docs](http://parsely.com/docs/integration/tracking/google-amp.html).
 
-##### Piano
+### Piano
 
 Type attribute value: `piano`
 
@@ -207,6 +219,13 @@ Adds support for Piano.  Configuration details can be found at [vx.piano.io](htt
 Type attribute value: `quantcast`
 
 Adds support for Quantcast Measurement. More details for adding Quantcast Measurement can be found at [quantcast.com](https://www.quantcast.com/help/guides/)
+
+## Segment
+
+Type attribute value: `segment`
+
+Adds support for segment page views and events.
+To see the full list of fields that you can send, see [Segment Spec](https://segment.com/docs/spec/).
 
 ### SOASTA mPulse
 
@@ -280,7 +299,7 @@ The `<amp-analytics>` configuration object uses the following format:
 ```
 ### Requests
 The `requests` attribute specifies the URLs used to transmit data to an analytics platform. The `request-name` is used
-in the trigger configuration to specify what request should be sent in response to a pariticular event. The `request-value`
+in the trigger configuration to specify what request should be sent in response to a particular event. The `request-value`
 is an https URL. These values may include placeholder tokens that can reference other requests or variables.
 
 ```javascript
@@ -317,28 +336,69 @@ The `triggers` attribute describes when an analytics request should be sent. It 
   - `selector` (required when `on` is set to `click`) This configuration is used on conjunction with the `click` trigger. Please see below for details.
   - `scrollSpec` (required when `on` is set to `scroll`) This configuration is used on conjunction with the `scroll` trigger. Please see below for details.
   - `timerSpec` (required when `on` is set to `timer`) This configuration is used on conjunction with the `timer` trigger. Please see below for details.
+  - `sampleSpec` This object is used to define how the requests can be sampled before they are sent. This setting allows sampling based on random input or other platform supported vars. The object contains configuration to specify an input that is used to generate a hash and a threshold that the hash must meet.
+    - `sampleOn` This string template is expanded by filling in the platform variables and then hashed to generate a number for the purposes of the sampling logic described under threshold below.
+    - `threshold` This configuration is used to filter out requests that do not meet particular criteria: For a request to go through to the analytics vendor, the following logic should be true `HASH(sampleOn) < threshold`.
+
+  As an example, following configuration can be used to sample 50% of the requests based on random input or at 1% based on client id.
+  ```
+  'triggers': {
+    'sampledOnRandom': {
+      'on': 'visible',
+      'request': 'request',
+      'sampleSpec': {
+        'sampleOn': '${random}',
+        'threshold': 50,
+      },
+    },
+    'sampledOnClientId': {
+      'on': 'visible',
+      'request': 'request',
+      'sampleSpec': {
+        'sampleOn': '${clientId(cookieName)}',
+        'threshold': 1,
+      },
+    },
+  },
+  ```
 
 #### Page visible trigger (`"on": "visible"`)
-Use this configuration to fire a request when the page becomes visible. No further configuration is required.
+Use this configuration to fire a request when the page becomes visible. The firing of this trigger can be configured using `visibilitySpec`. If multiple properties are specified, they must all be true in order for a request to fire. Configuration properties supported in `visibilitySpec` are:
+  - `selector` This property can be used to specify the element to which all the `visibilitySpec` conditions apply. The selector needs to be an css id that points to an [AMP extended  element](https://github.com/ampproject/amphtml/blob/master/spec/amp-tag-addendum.md#amp-specific-tags).
+  - `continuousTimeMin` and `continuousTimeMax` These properties indicate that a request should be fired when (any part of) an element has been within the viewport for a continuous amount of time that is between the minimum and maximum specified times. The times are expressed in milliseconds. Due to semantic restrictions, `continuousTimeMax` only works when the page is being hidden. Hence `continuousTimeMax` is not yet supported.
+  - `totalTimeMin` and `totalTimeMax` These properties indicate that a request should be fired when (any part of) an element has been within the viewport for a total amount of time that is between the minimum and maximum specified times. The times are expressed in milliseconds. Due to semantic restrictions, `totalTimeMax` only works when the page is being hidden. Hence `totalTimeMax` is not yet supported.
+  - `visiblePercentageMin` and `visiblePercentageMax` These properties indicate that a request should be fired when the proportion of an element that is visible within the viewport is between the minimum and maximum specified percentages. Percentage values between 0 and 100 are valid. Note that the lower bound (`visiblePercentageMin`) is inclusive while the upper bound (`visiblePercentageMax`) is not. When these properties are defined along with other timing related properties, only the time when these properties are met are counted.
+
+In addition to the conditions above, `visibilitySpec` also enables certain variables which are documented [here](./analytics-vars.md#visibility-variables).
 
 ```javascript
 "triggers": {
   "defaultPageview": {
     "on": "visible",
-    "request": "pageview"
+    "request": "pageview",
+    "visibilitySpec": {
+      "selector": "#anim-id",
+      "visiblePercentageMin": 20,
+      "totalTimeMin": 500,
+      "continuousTimeMin": 200
+    }
   }
 }
 ```
 
 #### Click trigger (`"on": "click"`)
 Use this configuration to fire a request when a specified element is clicked. Use `selector` to control which elements will cause this request to fire:
-  - `selector` A CSS selector used to refine which elements should be tracked. Use value `*` to track all elements.
+  - `selector` A CSS selector used to refine which elements should be tracked. Use value `*` to track all elements.  The value of `selector` can include variables that are defined in inline or remote config. The variables will be expanded to determine the elements to be tracked.
 
     ```javascript
+    "vars": {
+      "id1": "socialButtonId",
+      "id2": "shareButtonClass"
+    },
     "triggers": {
       "anchorClicks": {
         "on": "click",
-        "selector": "a",
+        "selector": "a, #${id1}, .${id2}",
         "request": "event",
         "vars": {
           "eventId": 128
@@ -348,7 +408,7 @@ Use this configuration to fire a request when a specified element is clicked. Us
     ```
 
 #### Scroll trigger (`"on": "scroll"`)
-Use this configuration to fire a request under certain conditions when the page is scrolled. Use `scrollSpec` to control when this will fire:
+Use this configuration to fire a request under certain conditions when the page is scrolled. This trigger provides [special vars](./analytics-vars.md#interaction) that indicate the boundaries that triggered a request to be sent. Use `scrollSpec` to control when this will fire:
   - `scrollSpec` This object can contain `verticalBoundaries` and `horizontalBoundaries`. At least one of the two properties is required for a scroll event to fire. The values for both of the properties should be arrays of numbers containing the boundaries on which a scroll event is generated. For instance, in the following code snippet, the scroll event will be fired when page is scrolled vertically by 25%, 50% and 90%. Additionally, the event will also fire when the page is horizontally scrolled to 90% of scroll width. To keep the page performant, the scroll boundaries are rounded to the nearest multiple of `5`.
 
 

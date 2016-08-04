@@ -58,7 +58,7 @@ amp.validator.Terminal = class {
    */
   constructor(opt_out) { this.out_ = opt_out || null; }
 
-  /** @param {!string} msg */
+  /** @param {string} msg */
   info(msg) {
     if (this.out_) {
       this.out_.push('I: ' + msg);
@@ -67,7 +67,7 @@ amp.validator.Terminal = class {
     }
   }
 
-  /** @param {!string} msg */
+  /** @param {string} msg */
   warn(msg) {
     if (this.out_) {
       this.out_.push('W: ' + msg);
@@ -78,7 +78,7 @@ amp.validator.Terminal = class {
     }
   }
 
-  /** @param {!string} msg */
+  /** @param {string} msg */
   error(msg) {
     if (this.out_) {
       this.out_.push('E: ' + msg);
@@ -95,7 +95,7 @@ amp.validator.Terminal = class {
  *   errors.
  * @param {string} url
  * @param {!amp.validator.Terminal=} opt_terminal
- * @param {!string=} opt_errorCategoryFilter
+ * @param {string=} opt_errorCategoryFilter
  */
 amp.validator.ValidationResult.prototype.outputToTerminal = function(
     url, opt_terminal, opt_errorCategoryFilter) {
@@ -106,16 +106,21 @@ amp.validator.ValidationResult.prototype.outputToTerminal = function(
   const status = this.status;
   if (status === amp.validator.ValidationResult.Status.PASS) {
     terminal.info('AMP validation successful.');
-    return;
-  }
-  if (status !== amp.validator.ValidationResult.Status.FAIL) {
+    if (this.errors.length === 0)
+      return;
+  } else if (status !== amp.validator.ValidationResult.Status.FAIL) {
     terminal.error(
-        'AMP validation had unknown results. This should not happen.');
+        'AMP validation had unknown results. This indicates a validator bug. ' +
+        'Please report at https://github.com/ampproject/amphtml/issues .');
     return;
   }
   let errors;
   if (errorCategoryFilter === null) {
-    terminal.error('AMP validation had errors:');
+    if (status == amp.validator.ValidationResult.Status.FAIL) {
+      terminal.error('AMP validation had errors:');
+    } else {
+      terminal.warn('AMP validation had warnings:');
+    }
     errors = this.errors;
   } else {
     errors = [];
@@ -145,49 +150,54 @@ amp.validator.ValidationResult.prototype.outputToTerminal = function(
       terminal.warn(errorLine(url, error));
     }
   }
+  if (errorCategoryFilter === null && errors.length !== 0) {
+    terminal.info(
+        'See also https://validator.ampproject.org/#url=' +
+        encodeURIComponent(goog.uri.utils.removeFragment(url)));
+  }
 };
 
 /**
+ * A regex for replacing any adjacent characters that are whitespace
+ * with a single space (' ').
+ * @private
+ * @type {RegExp}
+ */
+const matchWhitespaceRE = /\s+/g;
+
+/**
  * Applies the format to render the params in the provided error.
- * @param {!string} format
+ * @param {string} format
  * @param {!amp.validator.ValidationError} error
- * @return {!string}
+ * @return {string}
  */
 function applyFormat(format, error) {
   let message = format;
   for (let param = 1; param <= error.params.length; ++param) {
-    message =
-        message.replace(new RegExp('%' + param, 'g'), error.params[param - 1]);
+    const value = error.params[param - 1].replace(matchWhitespaceRE, ' ');
+    message = message.replace(new RegExp('%' + param, 'g'), value);
   }
   return message.replace(new RegExp('%%', 'g'), '%');
 }
 
 /**
- * Renders the error message for a single error, regardless of whether
- * or not it has an associated format.
+ * Renders the error message for a single error.
  * @param {!amp.validator.ValidationError} error
- * @return {!string}
+ * @return {string}
  * @export
  */
 amp.validator.renderErrorMessage = function(error) {
-  let out = '';
-  const format =
-      parsedValidatorRulesSingleton.getFormatByCode().get(error.code);
-  // A11Y errors are special cased and don't have parameters.
-  if (format !== undefined && error.params.length > 0) {
-    out += applyFormat(format, error);
-  } else {
-    out += error.code;
-    if (error.detail !== undefined) out += ' ' + error.detail;
-  }
-  return out;
+  goog.asserts.assert(error.code !== null);
+  const format = parsedValidatorRulesSingleton.getFormatByCode()[error.code];
+  goog.asserts.assert(format !== undefined);
+  return applyFormat(format, error);
 };
 
 /**
  * Renders one line of error output.
- * @param {!string} filenameOrUrl
+ * @param {string} filenameOrUrl
  * @param {!amp.validator.ValidationError} error
- * @return {!string}
+ * @return {string}
  */
 function errorLine(filenameOrUrl, error) {
   const line = error.line || 1;
@@ -236,12 +246,24 @@ amp.validator.renderValidationResult = function(validationResult, filename) {
  * @export
  */
 amp.validator.categorizeError = function(error) {
-  // This shouldn't happen in practice. We always set some params, and
-  // UNKNOWN_CODE would indicate that the field wasn't populated.
-  if (error.params.length === 0 ||
-      error.code === amp.validator.ValidationError.Code.UNKNOWN_CODE ||
+  // This shouldn't happen in practice. UNKNOWN_CODE would indicate that the
+  // field wasn't populated.
+  if (error.code === amp.validator.ValidationError.Code.UNKNOWN_CODE ||
       error.code === null) {
     return amp.validator.ErrorCategory.Code.UNKNOWN;
+  }
+  // E.g. "The tag 'UL', a child tag of 'amp-live-list', does not
+  // satisfy one of the acceptable reference points: AMP-LIVE-LIST
+  // [update], AMP-LIVE-LIST [items], AMP-LIVE-LIST [pagination]."
+  if (error.code ===
+          amp.validator.ValidationError.Code
+              .CHILD_TAG_DOES_NOT_SATISFY_REFERENCE_POINT ||
+      error.code ==
+          amp.validator.ValidationError.Code
+              .MANDATORY_REFERENCE_POINT_MISSING ||
+      error.code ==
+          amp.validator.ValidationError.Code.DUPLICATE_REFERENCE_POINT) {
+    return amp.validator.ErrorCategory.Code.AMP_TAG_PROBLEM;
   }
   // E.g. "The tag 'img' may only appear as a descendant of tag
   // 'noscript'. Did you mean 'amp-img'?"
@@ -260,6 +282,10 @@ amp.validator.categorizeError = function(error) {
   if (error.code ===
       amp.validator.ValidationError.Code.MANDATORY_TAG_ANCESTOR_WITH_HINT) {
     return amp.validator.ErrorCategory.Code.DISALLOWED_HTML_WITH_AMP_EQUIVALENT;
+  }
+  if (error.code ===
+      amp.validator.ValidationError.Code.DISALLOWED_MANUFACTURED_BODY) {
+    return amp.validator.ErrorCategory.Code.DISALLOWED_HTML;
   }
   // At the moment it's not possible to get this particular error since
   // all mandatory tag ancestors have hints except for noscript, but
@@ -344,6 +370,8 @@ amp.validator.categorizeError = function(error) {
            amp.validator.ValidationError.Code.CSS_SYNTAX_INVALID_URL ||
        error.code ===
            amp.validator.ValidationError.Code.CSS_SYNTAX_INVALID_URL_PROTOCOL ||
+       error.code ===
+           amp.validator.ValidationError.Code.CSS_SYNTAX_DISALLOWED_DOMAIN ||
        error.code ===
            amp.validator.ValidationError.Code
                .CSS_SYNTAX_DISALLOWED_RELATIVE_URL) &&
@@ -457,7 +485,9 @@ amp.validator.categorizeError = function(error) {
   // E.g. "The attribute 'shortcode' in tag 'amp-instagram' is deprecated -
   // use 'data-shortcode' instead."
   if (error.code === amp.validator.ValidationError.Code.DEPRECATED_ATTR ||
-      error.code === amp.validator.ValidationError.Code.DEPRECATED_TAG) {
+      error.code === amp.validator.ValidationError.Code.DEPRECATED_TAG ||
+      error.code ===
+          amp.validator.ValidationError.Code.DEPRECATED_MANUFACTURED_BODY) {
     return amp.validator.ErrorCategory.Code.DEPRECATION;
   }
   // E.g. "The parent tag of tag 'source' is 'picture', but it can
@@ -526,6 +556,7 @@ amp.validator.categorizeError = function(error) {
   if (error.code == amp.validator.ValidationError.Code.MISSING_URL ||
       error.code == amp.validator.ValidationError.Code.INVALID_URL ||
       error.code == amp.validator.ValidationError.Code.INVALID_URL_PROTOCOL ||
+      error.code == amp.validator.ValidationError.Code.DISALLOWED_DOMAIN ||
       error.code ==
           amp.validator.ValidationError.Code.DISALLOWED_RELATIVE_URL) {
     if (goog.string./*OK*/ startsWith(error.params[1], 'amp-')) {

@@ -17,14 +17,14 @@
 import {Observable} from '../observable';
 import {documentStateFor} from '../document-state';
 import {getMode} from '../mode';
-import {getService} from '../service';
+import {fromClass} from '../service';
 import {dev} from '../log';
 import {parseQueryString, parseUrl, removeFragment} from '../url';
 import {platform} from '../platform';
 import {timer} from '../timer';
 import {reportError} from '../error';
 import {VisibilityState} from '../visibility-state';
-
+import {urls} from '../config';
 
 const TAG_ = 'Viewer';
 const SENTINEL_ = '__AMP__';
@@ -208,7 +208,7 @@ export class Viewer {
     // realistic iOS environment.
     if (platform.isIos() &&
             this.viewportType_ != ViewportType.NATURAL_IOS_EMBED &&
-            (getMode().localDev || getMode().development)) {
+            (getMode(win).localDev || getMode(win).development)) {
       this.viewportType_ = ViewportType.NATURAL_IOS_EMBED;
     }
     dev.fine(TAG_, '- viewportType:', this.viewportType_);
@@ -226,7 +226,8 @@ export class Viewer {
      * a web view.
      * @private @const {boolean}
      */
-    this.isEmbedded_ = this.isIframed_ || this.params_['webview'] === '1';
+    this.isEmbedded_ = (this.isIframed_ || this.params_['webview'] === '1') &&
+        !this.win.AMP_TEST_IFRAME;
 
     /** @private {boolean} */
     this.hasBeenVisible_ = this.isVisible();
@@ -407,6 +408,43 @@ export class Viewer {
   }
 
   /**
+   * Viewers can communicate their "capabilities" and this method allows
+   * checking them.
+   * @param {string} name Of the capability.
+   * @return {boolean}
+   */
+  hasCapability(name) {
+    const capabilities = this.params_['cap'];
+    if (!capabilities) {
+      return false;
+    }
+    // TODO(@cramforce): Consider caching the split.
+    return capabilities.split(',').indexOf(name) != -1;
+  }
+
+  /**
+   * Requests A2A navigation to the given destination. If the viewer does
+   * not support this operation, will navigate the top level window
+   * to the destination.
+   * The URL is assumed to be in AMP Cache format already.
+   * @param {string} url An AMP article URL.
+   * @param {string} requestedBy Informational string about the entity that
+   *     requested the navigation.
+   */
+  navigateTo(url, requestedBy) {
+    dev.assert(url.indexOf(urls.cdn) == 0,
+        'Invalid A2A URL %s %s', url, requestedBy);
+    if (this.hasCapability('a2a')) {
+      this.sendMessage('a2a', {
+        url,
+        requestedBy,
+      }, /* awaitResponse */ false);
+    } else {
+      this.win.top.location.href = url;
+    }
+  }
+
+  /**
    * Whether the document is embedded in a iframe.
    * @return {boolean}
    */
@@ -431,10 +469,15 @@ export class Viewer {
 
   /**
    * Identifies if the viewer is recording instrumentation.
+   * Will also return false if no messaging channel is established, this
+   * means the AMP page is not embedded.
    * @return {boolean}
    */
   isPerformanceTrackingOn() {
-    return this.performanceTracking_;
+    // If there is no messagingMaybePromise_, then document is not
+    // embedded and no performance tracking is needed since there is nobody
+    // to forward the events.
+    return this.performanceTracking_ && !!this.messagingMaybePromise_;
   }
 
   /**
@@ -630,7 +673,7 @@ export class Viewer {
   /**
    * Whether the viewer has been whitelisted for more sensitive operations
    * such as customizing referrer.
-   * @return {boolean}
+   * @return {!Promise<boolean>}
    */
   isTrustedViewer() {
     return this.isTrustedViewer_;
@@ -699,6 +742,15 @@ export class Viewer {
   }
 
   /**
+   * Triggers "scroll" event for the viewer.
+   * @param {number} scrollTop
+   */
+  postScroll(scrollTop) {
+    this.sendMessageUnreliable_(
+        'scroll', {scrollTop}, false);
+  }
+
+  /**
    * Requests full overlay mode from the viewer. Returns a promise that yields
    * when the viewer has switched to full overlay mode.
    * @return {!Promise}
@@ -738,10 +790,35 @@ export class Viewer {
 
   /**
    * Retrieves the Base CID from the viewer
-   * @return {!Promise<string>}
+   * @return {!Promise<string|undefined>}
    */
   getBaseCid() {
-    return this.sendMessage('cid', undefined, true);
+    return this.isTrustedViewer().then(trusted => {
+      if (!trusted) {
+        return undefined;
+      }
+      return this.sendMessage('cid', undefined, true);
+    });
+  }
+
+  /**
+   * Get the fragment from the url or the viewer.
+   * Strip leading '#' in the fragment
+   * @return {!Promise<string>}
+   */
+  getFragment() {
+    if (!this.isEmbedded_) {
+      let hash = this.win.location.hash;
+      /* Strip leading '#' */
+      hash = hash.substr(1);
+      return Promise.resolve(hash);
+    }
+    if (!this.hasCapability('fragment')) {
+      return Promise.resolve('');
+    }
+    return this.sendMessageUnreliable_('fragment', undefined, true).then(
+      hash => hash || ''
+    );
   }
 
   /**
@@ -944,6 +1021,15 @@ export class Viewer {
       }
     });
   }
+
+  /**
+   * Resolves when there is a messaging channel established with the viewer.
+   * Will be null if no messaging is needed like in an non-embedded document.
+   * @return {?Promise}
+   */
+  whenMessagingReady() {
+    return this.messagingMaybePromise_;
+  }
 }
 
 
@@ -991,7 +1077,5 @@ export let ViewerHistoryPoppedEventDef;
  * @return {!Viewer}
  */
 export function installViewerService(window) {
-  return getService(window, 'viewer', () => {
-    return new Viewer(window);
-  });
+  return fromClass(window, 'viewer', Viewer);
 };
