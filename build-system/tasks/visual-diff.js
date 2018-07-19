@@ -54,6 +54,9 @@ const BUILD_PROCESSING_TIMEOUT_MS = 15 * 1000; // Wait for up to 10 minutes
 const MASTER_BRANCHES_REGEXP = /^(?:master|release|canary|amp-release-.*)$/;
 const PERCY_BUILD_URL = 'https://percy.io/ampproject/amphtml/builds';
 
+const preVisualDiffTasks =
+    (argv.nobuild || argv.verify_status) ? [] : ['build'];
+
 /**
  * Logs a message to the console.
  *
@@ -88,12 +91,24 @@ function log(mode, ...messages) {
 }
 
 /**
+ * Override PERCY_* environment variables if passed via gulp task parameters.
+ */
+function maybeOverridePercyEnvironmentVariables() {
+  ['percy_project', 'percy_token', 'percy_branch'].forEach(variable => {
+    if (variable in argv) {
+      process.env[variable.toUpperCase()] = argv[variable];
+    }
+  });
+}
+
+/**
  * Disambiguates branch names by decorating them with the commit author name.
  * We do this for all non-push builds in order to prevent them from being used
  * as baselines for future builds.
  */
 function setPercyBranch() {
-  if (!argv.master || !process.env['TRAVIS']) {
+  if (!process.env['PERCY_BRANCH'] &&
+      (!argv.master || !process.env['TRAVIS'])) {
     const userName = gitCommitterEmail();
     const branchName = process.env['TRAVIS'] ?
       process.env['TRAVIS_PULL_REQUEST_BRANCH'] : gitBranchName();
@@ -113,9 +128,14 @@ function setPercyBranch() {
 async function launchWebServer() {
   const gulpServeAsync = execScriptAsync(
       `gulp serve --host ${HOST} --port ${PORT} ${process.env.WEBSERVER_QUIET}`,
-      {stdio: 'inherit'});
+      {
+        stdio: argv.webserver_debug ?
+          ['ignore', process.stdout, process.stderr] :
+          'ignore',
+      });
 
-  gulpServeAsync.on('exit', code => {
+  gulpServeAsync.on('close', code => {
+    code = code || 0;
     if (code != 0) {
       log('error', colors.cyan("'serve'"),
           `errored with code ${code}. Cannot continue with visual diff tests`);
@@ -124,11 +144,7 @@ async function launchWebServer() {
   });
 
   process.on('exit', async() => {
-    if (gulpServeAsync.exitCode == null) {
-      gulpServeAsync.kill();
-      // The child node process has an asynchronous stdout. See #10409.
-      await sleep(100);
-    }
+    await shutdown(gulpServeAsync);
   });
 
   let resolver, rejecter;
@@ -140,8 +156,26 @@ async function launchWebServer() {
     host: HOST,
     port: PORT,
     retries: WEBSERVER_TIMEOUT_RETRIES, // retry timeout defaults to 1 sec
-  }).on('connected', resolver).on('timeout', rejecter);
+  }).on('connected', () => {
+    return resolver(gulpServeAsync);
+  }).on('timeout', rejecter);
   return deferred;
+}
+
+/**
+ * Kill the webserver process and this own process.
+ *
+ * @param {!ChildProcess} webServerProcess the webserver process to shut down.
+ */
+async function shutdown(webServerProcess) {
+  if (!webServerProcess.killed) {
+    // Explicitly exit the webserver.
+    webServerProcess.kill();
+    // The child node process has an asynchronous stdout. See #10409.
+    await sleep(100);
+  }
+  // TODO(rsimha): clean up this exit.
+  process.exit();
 }
 
 /**
@@ -303,7 +337,8 @@ function cleanupAmpConfig() {
   log('verbose', 'Cleaning up existing AMP config');
   AMP_RUNTIME_TARGET_FILES.forEach(targetFile => {
     execOrDie(
-        `gulp prepend-global --local_dev --target ${targetFile} --remove`);
+        `gulp prepend-global --local_dev --target ${targetFile} --remove`,
+        {'stdio': 'ignore'});
   });
 }
 
@@ -316,8 +351,8 @@ function applyAmpConfig(config) {
   log('verbose', 'Switching to the', colors.cyan(config), 'AMP config');
   AMP_RUNTIME_TARGET_FILES.forEach(targetFile => {
     execOrDie(
-        `gulp prepend-global --local_dev --target ${targetFile} ` +
-        `--${config}`);
+        `gulp prepend-global --local_dev --target ${targetFile} --${config}`,
+        {'stdio': 'ignore'});
   });
 }
 
@@ -337,10 +372,23 @@ async function generateSnapshots(percy, page, webpages) {
   }
   cleanupAmpConfig();
 
-  const numFlakyTests = webpages.filter(webpage => webpage.flaky).length;
-  if (numFlakyTests > 0) {
-    log('info', 'Skipping', colors.cyan(numFlakyTests), 'flaky tests');
+  const numUnfilteredTests = webpages.length;
+  webpages = webpages.filter(webpage => !webpage.flaky);
+  if (numUnfilteredTests != webpages.length) {
+    log('info', 'Skipping', colors.cyan(numUnfilteredTests - webpages.length),
+        'flaky tests');
   }
+  if (argv.grep) {
+    webpages = webpages.filter(webpage => argv.grep.test(webpage.name));
+    log('info', colors.cyan(`--grep ${argv.grep}`), 'matched',
+        colors.cyan(webpages.length), 'tests');
+  }
+
+  if (!webpages.length) {
+    log('fatal', 'No tests left to run!');
+    return;
+  }
+
   for (const config of CONFIGS) {
     applyAmpConfig(config);
     log('verbose',
@@ -359,10 +407,10 @@ async function generateSnapshots(percy, page, webpages) {
  * @param {string} config Config being used. One of 'canary' or 'prod'.
  */
 async function snapshotWebpages(percy, page, webpages, config) {
-  webpages = webpages.filter(webpage => !webpage.flaky);
   for (const webpage of webpages) {
     const {url} = webpage;
     const name = `${webpage.name} (${config})`;
+    log('verbose', 'Visual diff test', colors.yellow(name));
 
     await enableExperiments(page, webpage['experiments']);
     log('verbose', 'Navigating to page', colors.yellow(`${BASE_URL}/${url}`));
@@ -485,12 +533,14 @@ async function waitForElementVisibility(page, selector, options) {
       elementsAreVisible.push(elementIsVisible);
     }
 
-    log('verbose', 'Found', colors.cyan(elementsAreVisible.length),
-        'element(s) matching the CSS selector', colors.cyan(selector));
     if (elementsAreVisible.length) {
+      log('verbose', 'Found', colors.cyan(elementsAreVisible.length),
+          'element(s) matching the CSS selector', colors.cyan(selector));
       log('verbose', 'Expecting all element visibilities to be',
           colors.cyan(waitForVisible), '; they are',
           colors.cyan(elementsAreVisible));
+    } else {
+      log('verbose', 'No', colors.cyan(selector), 'matches found');
     }
     // Since we assert that waitForVisible == !waitForHidden, there is no need
     // to check equality to both waitForVisible and waitForHidden.
@@ -558,9 +608,8 @@ function setDebuggingLevel() {
   process.env.WEBSERVER_QUIET = '--quiet';
 
   if (argv.debug) {
-    // eslint-disable-next-line google-camelcase/google-camelcase
-    argv.chrome_debug = true;
-    process.env.WEBSERVER_QUIET = '';
+    argv['chrome_debug'] = true;
+    argv['webserver_debug'] = true;
   }
   if (argv.webserver_debug) {
     process.env.WEBSERVER_QUIET = '';
@@ -596,9 +645,14 @@ async function createEmptyBuild(page) {
  * Runs the AMP visual diff tests.
  */
 async function visualDiff() {
+  maybeOverridePercyEnvironmentVariables();
   setPercyBranch();
 
-  if (argv.verify) {
+  if (argv.grep) {
+    argv.grep = RegExp(argv.grep);
+  }
+
+  if (argv.verify_status) {
     const buildId = fs.readFileSync('PERCY_BUILD_ID', 'utf8');
     const status = await waitForBuildCompletion(buildId);
     verifyBuildStatus(status, buildId);
@@ -613,14 +667,13 @@ async function visualDiff() {
 
   // Launch a browser and local web server.
   const page = await launchBrowser();
-  await launchWebServer().catch(reason => {
+  const webServerProcess = await launchWebServer().catch(reason => {
     log('fatal', `Failed to start a web server: ${reason}`);
   });
 
   if (argv.skip) {
     await createEmptyBuild(page);
-    // Explicitly exit, to trigger the webserver's exit event too.
-    process.exit();
+    await shutdown(webServerProcess);
     return;
   }
 
@@ -631,23 +684,28 @@ async function visualDiff() {
           'utf8'));
   await runVisualTests(page, visualTestsConfig);
 
-  // Explicitly exit, to trigger the webserver's exit event too.
-  process.exit();
+  await shutdown(webServerProcess);
 }
 
 gulp.task(
     'visual-diff',
     'Runs the AMP visual diff tests.',
+    preVisualDiffTasks,
     visualDiff,
     {
       options: {
         'master': '  Includes a blank snapshot (baseline for skipped builds)',
-        'verify': '  Verifies the status of the build ID in ./PERCY_BUILD_ID',
+        'verify_status':
+          '  Verifies the status of the build ID in ./PERCY_BUILD_ID',
         'skip': '  Creates a dummy Percy build with only a blank snapshot',
         'headless': '  Runs Chrome in headless mode',
         'chrome_debug': '  Prints debug info from Chrome',
         'webserver_debug': '  Prints debug info from the local gulp webserver',
         'debug': '  Prints all the above debug info',
+        'grep': '  Runs tests that match the pattern',
+        'percy_project': '  Override the PERCY_PROJECT environment variable',
+        'percy_token': '  Override the PERCY_TOKEN environment variable',
+        'percy_branch': '  Override the PERCY_BRANCH environment variable',
       },
     }
 );

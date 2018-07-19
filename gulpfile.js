@@ -34,6 +34,7 @@ const rimraf = require('rimraf');
 const source = require('vinyl-source-stream');
 const touch = require('touch');
 const watchify = require('watchify');
+const wrappers = require('./build-system/compile-wrappers');
 const {applyConfig, removeConfig} = require('./build-system/tasks/prepend-global/index.js');
 const {cleanupBuildDir, closureCompile} = require('./build-system/tasks/compile');
 const {createCtrlcHandler, exitCtrlcHandler} = require('./build-system/ctrlcHandler');
@@ -59,14 +60,24 @@ const extensionAliasFilePath = {};
 const {green, red, cyan} = colors;
 
 const minifiedRuntimeTarget = 'dist/v0.js';
+const minifiedRuntimeEsmTarget = 'dist/v0-esm.js';
 const minified3pTarget = 'dist.3p/current-min/f.js';
 const unminifiedRuntimeTarget = 'dist/amp.js';
+const unminifiedRuntimeEsmTarget = 'dist/amp-esm.js';
 const unminified3pTarget = 'dist.3p/current/integration.js';
+
+const maybeUpdatePackages = process.env.TRAVIS ? [] : ['update-packages'];
 
 extensionBundles.forEach(c => declareExtension(c.name, c.version, c.options));
 aliasBundles.forEach(c => {
   declareExtensionVersionAlias(c.name, c.version, c.latestVersion, c.options);
 });
+
+/**
+ * Tasks that should print the `--nobuild` help text.
+ * @private @const {!Set<string>}
+ */
+const NOBUILD_HELP_TASKS = new Set(['test', 'visual-diff']);
 
 /**
  * Extensions to build when `--extensions=minimal_set`.
@@ -269,23 +280,17 @@ function compile(watch, shouldMinify, opt_preventRemoveAndMakeDir,
           includePolyfills: false,
         }),
     compileJs('./src/', 'amp.js', './dist', {
+      toName: 'amp.js',
       minifiedName: 'v0.js',
       includePolyfills: true,
       checkTypes: opt_checkTypes,
       watch,
       preventRemoveAndMakeDir: opt_preventRemoveAndMakeDir,
       minify: shouldMinify,
-      // If there is a sync JS error during initial load,
-      // at least try to unhide the body.
-      wrapper: 'try{(function(){<%= contents %>})()}catch(e){' +
-          'setTimeout(function(){' +
-          'var s=document.body.style;' +
-          's.opacity=1;' +
-          's.visibility="visible";' +
-          's.animation="none";' +
-          's.WebkitAnimation="none;"},1000);throw e};',
+      wrapper: wrappers.mainBinary,
     }),
     compileJs('./src/', 'amp.js', './dist', {
+      toName: 'amp-esm.js',
       minifiedName: 'v0-esm.js',
       includePolyfills: true,
       includeOnlyESMLevelPolyfills: true,
@@ -293,15 +298,7 @@ function compile(watch, shouldMinify, opt_preventRemoveAndMakeDir,
       watch,
       preventRemoveAndMakeDir: opt_preventRemoveAndMakeDir,
       minify: shouldMinify,
-      // If there is a sync JS error during initial load,
-      // at least try to unhide the body.
-      wrapper: 'try{(function(){<%= contents %>})()}catch(e){' +
-          'setTimeout(function(){' +
-          'var s=document.body.style;' +
-          's.opacity=1;' +
-          's.visibility="visible";' +
-          's.animation="none";' +
-          's.WebkitAnimation="none;"},1000);throw e};',
+      wrapper: wrappers.mainBinary,
     }),
     compileJs('./extensions/amp-viewer-integration/0.1/examples/',
         'amp-viewer-host.js', './dist/v0/examples', {
@@ -590,10 +587,6 @@ function buildExtensionCss(path, name, version, options) {
  */
 function buildExtensionJs(path, name, version, options) {
   const filename = options.filename || name + '.js';
-  if (options.loadPriority && options.loadPriority != 'high') {
-    throw new Error('Unsupported loadPriority: ' + options.loadPriority);
-  }
-  const priority = options.loadPriority ? 'p:"high",' : '';
   return compileJs(path + '/', filename, './dist/v0', Object.assign(options, {
     toName: `${name}-${version}.max.js`,
     minifiedName: `${name}-${version}.js`,
@@ -604,8 +597,7 @@ function buildExtensionJs(path, name, version, options) {
     // since it will be immediately executed anyway.
     // See https://github.com/ampproject/amphtml/issues/3977
     wrapper: options.noWrapper ? ''
-      : `(self.AMP=self.AMP||[]).push({n:"${name}",${priority}` +
-      `v:"${internalRuntimeVersion}",f:(function(AMP){<%= contents %>\n})});`,
+      : wrappers.extension(name, options.loadPriority),
   }));
 }
 
@@ -613,10 +605,15 @@ function buildExtensionJs(path, name, version, options) {
  * Prints a message that could help speed up local development.
  */
 function printNobuildHelp() {
-  if (!process.env.TRAVIS && argv['_'].indexOf('test') != -1) {
-    log(green('To skip building during future test runs, use'),
-        cyan('--nobuild'), green('with your'), cyan('gulp test'),
-        green('command.'));
+  if (!process.env.TRAVIS) {
+    for (const task of NOBUILD_HELP_TASKS) { // eslint-disable-line amphtml-internal/no-for-of-statement
+      if (argv._.includes(task)) {
+        log(green('To skip building during future'), cyan(task),
+            green('runs, use'), cyan('--nobuild'), green('with your'),
+            cyan(`gulp ${task}`), green('command.'));
+        return;
+      }
+    }
   }
 }
 
@@ -794,7 +791,9 @@ function dist() {
         copyAliasExtensions();
       }).then(() => {
         if (argv.fortesting) {
-          return enableLocalTesting(minifiedRuntimeTarget);
+          return enableLocalTesting(minifiedRuntimeTarget).then(() => {
+            return enableLocalTesting(minifiedRuntimeEsmTarget);
+          });
         }
       }).then(() => {
         return createModuleCompatibleES5Bundle('v0.js');
@@ -868,7 +867,7 @@ function checkTypes() {
             include3pDirectories: true,
             includePolyfills: true,
             extraGlobs: ['src/inabox/*.js'],
-            checkTypes: true,
+            typeCheckOnly: true,
           }),
       // Type check 3p/ads code.
       closureCompile(['./3p/integration.js'], './dist',
@@ -876,21 +875,21 @@ function checkTypes() {
             externs: ['ads/ads.extern.js'],
             include3pDirectories: true,
             includePolyfills: true,
-            checkTypes: true,
+            typeCheckOnly: true,
           }),
       closureCompile(['./3p/ampcontext-lib.js'], './dist',
           'ampcontext-check-types.js', {
             externs: ['ads/ads.extern.js'],
             include3pDirectories: true,
             includePolyfills: true,
-            checkTypes: true,
+            typeCheckOnly: true,
           }),
       closureCompile(['./3p/iframe-transport-client-lib.js'], './dist',
           'iframe-transport-client-check-types.js', {
             externs: ['ads/ads.extern.js'],
             include3pDirectories: true,
             includePolyfills: true,
-            checkTypes: true,
+            typeCheckOnly: true,
           }),
     ]);
   }).then(() => {
@@ -1021,7 +1020,7 @@ function compileJs(srcDir, srcFilename, destDir, options) {
           }
         })
         .then(() => {
-          endBuildStep('Minified', srcFilename, startTime);
+          endBuildStep('Minified', options.minifiedName, startTime);
 
           // Remove intemediary, transpiled JS files after compilation.
           if (options.typeScript) {
@@ -1052,7 +1051,7 @@ function compileJs(srcDir, srcFilename, destDir, options) {
   // Default wrapper for `gulp build`.
   // We don't need an explicit function wrapper like we do for `gulp dist`
   // because Babel handles that for you.
-  const wrapper = options.wrapper || '<%= contents %>';
+  const wrapper = options.wrapper || wrappers.none;
 
   const lazybuild = lazypipe()
       .pipe(source, srcFilename)
@@ -1098,7 +1097,7 @@ function compileJs(srcDir, srcFilename, destDir, options) {
                   path.join(destDir, destFilename));
             }))
         .then(() => {
-          endBuildStep('Compiled', srcFilename, startTime);
+          endBuildStep('Compiled', destFilename, startTime);
 
           // Remove intemediary, transpiled JS files after compilation.
           if (options.typeScript) {
@@ -1107,9 +1106,11 @@ function compileJs(srcDir, srcFilename, destDir, options) {
         })
         .then(() => {
           if (process.env.NODE_ENV === 'development') {
-            if (srcFilename === 'amp.js') {
+            if (destFilename === 'amp.js') {
               return enableLocalTesting(unminifiedRuntimeTarget);
-            } else if (srcFilename === 'integration.js') {
+            } else if (destFilename === 'amp-esm.js') {
+              return enableLocalTesting(unminifiedRuntimeEsmTarget);
+            } else if (destFilename === 'integration.js') {
               return enableLocalTesting(unminified3pTarget);
             } else {
               return Promise.resolve();
@@ -1490,7 +1491,7 @@ function toPromise(readable) {
 /**
  * Gulp tasks
  */
-gulp.task('build', 'Builds the AMP library', ['update-packages'], build, {
+gulp.task('build', 'Builds the AMP library', maybeUpdatePackages, build, {
   options: {
     config: '  Sets the runtime\'s AMP_CONFIG to one of "prod" or "canary"',
     extensions: '  Builds only the listed extensions.',
@@ -1499,16 +1500,16 @@ gulp.task('build', 'Builds the AMP library', ['update-packages'], build, {
 });
 gulp.task('check-all', 'Run through all presubmit checks',
     ['lint', 'dep-check', 'check-types', 'presubmit']);
-gulp.task('check-types', 'Check JS types', ['update-packages'], checkTypes);
-gulp.task('css', 'Recompile css to build directory', ['update-packages'], css);
+gulp.task('check-types', 'Check JS types', maybeUpdatePackages, checkTypes);
+gulp.task('css', 'Recompile css to build directory', maybeUpdatePackages, css);
 gulp.task('default', 'Runs "watch" and then "serve"',
-    ['update-packages', 'watch'], serve, {
+    maybeUpdatePackages.concat(['watch']), serve, {
       options: {
         extensions: '  Watches and builds only the listed extensions.',
         noextensions: '  Watches and builds with no extensions.',
       },
     });
-gulp.task('dist', 'Build production binaries', ['update-packages'], dist, {
+gulp.task('dist', 'Build production binaries', maybeUpdatePackages, dist, {
   options: {
     pseudo_names: '  Compiles with readable names. ' +
             'Great for profiling and debugging production code.',
@@ -1517,7 +1518,7 @@ gulp.task('dist', 'Build production binaries', ['update-packages'], dist, {
   },
 });
 gulp.task('watch', 'Watches for changes in files, re-builds when detected',
-    ['update-packages'], watch, {
+    maybeUpdatePackages, watch, {
       options: {
         with_inabox: '  Also watch and build the amp-inabox.js binary.',
         with_shadow: '  Also watch and build the amp-shadow.js binary.',
